@@ -1,0 +1,14 @@
+<form method="POST" action="{{ isset($salary) ? route('salaries.update', $salary) : route('salaries.store') }}">
+    @csrf
+    @isset($salary) @method('PUT') @endisset
+    <div class="form-grid">
+        <div class="field field-span-2"><label for="employee_id">Employee</label><select id="employee_id" name="employee_id" required><option value="">Choose an employee</option>@foreach($employees as $employee)<option value="{{ $employee->id }}" @selected((string) old('employee_id', $salary->employee_id ?? '') === (string) $employee->id)>{{ $employee->user?->name ?? 'Employee account unavailable' }} · {{ $employee->employee_id }}</option>@endforeach</select>@error('employee_id')<p class="field-error">{{ $message }}</p>@enderror</div>
+        <div class="field"><label for="basic_salary">Basic salary</label><input id="basic_salary" name="basic_salary" type="number" min="0" max="9999999999.99" step="0.01" value="{{ old('basic_salary', $salary->basic_salary ?? '') }}" required>@error('basic_salary')<p class="field-error">{{ $message }}</p>@enderror</div>
+        <div class="field"><label for="allowances">Allowances</label><input id="allowances" name="allowances" type="number" min="0" max="9999999999.99" step="0.01" value="{{ old('allowances', $salary->allowances ?? '0.00') }}" required>@error('allowances')<p class="field-error">{{ $message }}</p>@enderror</div>
+        <div class="field"><label for="deductions">Deductions</label><input id="deductions" name="deductions" type="number" min="0" max="9999999999.99" step="0.01" value="{{ old('deductions', $salary->deductions ?? '0.00') }}" required>@error('deductions')<p class="field-error">{{ $message }}</p>@enderror</div>
+        <div class="field"><label for="salary_month">Salary month</label><input id="salary_month" name="salary_month" type="month" value="{{ old('salary_month', isset($salary) ? $salary->salary_month->format('Y-m') : now()->format('Y-m')) }}" required>@error('salary_month')<p class="field-error">{{ $message }}</p>@enderror</div>
+        <div class="field"><label for="payment_status">Payment status</label><select id="payment_status" name="payment_status" required>@foreach(\App\Models\Salary::PAYMENT_STATUSES as $status)<option value="{{ $status }}" @selected(old('payment_status', $salary->payment_status ?? 'pending') === $status)>{{ ucfirst($status) }}</option>@endforeach</select>@error('payment_status')<p class="field-error">{{ $message }}</p>@enderror</div>
+    </div>
+    <p class="salary-formula">Net salary = basic salary + allowances - deductions. The value is calculated on the server.</p>
+    <div class="form-actions"><a class="btn btn-secondary" href="{{ isset($salary) ? route('salaries.show', $salary) : route('salaries.index') }}">Cancel</a><button class="btn btn-primary" type="submit">{{ isset($salary) ? 'Save changes' : 'Create salary record' }}</button></div>
+</form>

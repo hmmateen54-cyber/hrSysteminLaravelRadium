@@ -1,0 +1,14 @@
+<x-app-layout>
+    <x-slot name="header"><h1>Mark attendance</h1><p>Record an employee's attendance for a specific day.</p></x-slot>
+    <section class="page-intro"><div><div class="eyebrow">DAILY ATTENDANCE</div><h2 class="page-title">Mark attendance</h2><p class="page-subtitle">Only one attendance record can be entered per employee each day.</p></div><a class="btn btn-secondary" href="{{ route('attendances.index') }}">← Attendance list</a></section>
+    <section class="panel form-panel"><div class="panel-head"><div><h2 class="panel-title">Attendance details</h2></div></div><div class="panel-body"><form action="{{ route('attendances.store') }}" method="POST">@csrf
+        <div class="form-grid">
+            <div class="field field-span-2"><label for="employee_id">Employee</label><select id="employee_id" name="employee_id" required><option value="">Choose an employee</option>@foreach($employees as $employee)<option value="{{ $employee->id }}" @selected(old('employee_id') == $employee->id)>{{ $employee->employee_id }} · {{ $employee->user?->name ?? 'User unavailable' }}</option>@endforeach</select>@error('employee_id')<p class="field-error">{{ $message }}</p>@enderror</div>
+            <div class="field"><label for="attendance_date">Date</label><input id="attendance_date" type="date" name="attendance_date" value="{{ old('attendance_date', today()->format('Y-m-d')) }}" required>@error('attendance_date')<p class="field-error">{{ $message }}</p>@enderror</div>
+            <div class="field"><label for="status">Status</label><select id="status" name="status" required><option value="">Choose a status</option>@foreach(['present' => 'Present', 'absent' => 'Absent', 'late' => 'Late', 'leave' => 'On leave'] as $value => $label)<option value="{{ $value }}" @selected(old('status') === $value)>{{ $label }}</option>@endforeach</select>@error('status')<p class="field-error">{{ $message }}</p>@enderror</div>
+            <div class="field"><label for="check_in">Check in <span class="optional">· optional</span></label><input id="check_in" type="time" name="check_in" value="{{ old('check_in') }}">@error('check_in')<p class="field-error">{{ $message }}</p>@enderror</div>
+            <div class="field"><label for="check_out">Check out <span class="optional">· optional</span></label><input id="check_out" type="time" name="check_out" value="{{ old('check_out') }}">@error('check_out')<p class="field-error">{{ $message }}</p>@enderror</div>
+            <div class="field field-span-2"><label for="remarks">Remarks <span class="optional">· optional</span></label><textarea id="remarks" name="remarks">{{ old('remarks') }}</textarea>@error('remarks')<p class="field-error">{{ $message }}</p>@enderror</div>
+        </div><div class="form-actions"><a class="btn btn-secondary" href="{{ route('attendances.index') }}">Cancel</a><button class="btn btn-primary" type="submit">Save attendance</button></div>
+    </form></div></section>
+</x-app-layout>

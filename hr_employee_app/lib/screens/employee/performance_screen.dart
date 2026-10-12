@@ -1,0 +1,99 @@
+import 'package:flutter/material.dart';
+import '../../components/logout_action.dart';
+import '../../components/app_error.dart';
+import '../../components/app_loader.dart';
+import '../../services/api_service.dart';
+
+class PerformanceScreen extends StatefulWidget {
+  const PerformanceScreen({super.key});
+
+  @override
+  State<PerformanceScreen> createState() => _PerformanceScreenState();
+}
+
+class _PerformanceScreenState extends State<PerformanceScreen> {
+  List<dynamic> performance = [];
+  bool loading = true;
+  String? error;
+
+  Future<void> getPerformance() async {
+    setState(() {
+      loading = true;
+      error = null;
+    });
+
+    try {
+      final response = await ApiService.get('/employee/performance');
+
+      if (ApiService.isSuccess(response['status'])) {
+        setState(() {
+          performance = response['data']['performance'];
+          loading = false;
+        });
+      } else {
+        setState(() {
+          loading = false;
+          error = response['data']['message'] ?? 'Failed to load performance';
+        });
+      }
+    } catch (e) {
+      setState(() {
+        loading = false;
+        error = 'Unable to connect to server';
+      });
+    }
+  }
+
+  @override
+  void initState() {
+    super.initState();
+
+    getPerformance();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('My Performance'),
+        actions: const [LogoutAction()],
+      ),
+
+      body: loading
+          ? const AppLoader()
+          : error != null
+          ? AppError(message: error!, onRetry: getPerformance)
+          : performance.isEmpty
+          ? const Center(child: Text('No performance records found'))
+          : RefreshIndicator(
+              onRefresh: getPerformance,
+              child: ListView.builder(
+                padding: const EdgeInsets.all(16),
+                itemCount: performance.length,
+                itemBuilder: (context, index) {
+                  final record = performance[index];
+
+                  return Card(
+                    margin: const EdgeInsets.only(bottom: 12),
+                    child: ListTile(
+                      leading: const CircleAvatar(
+                        child: Icon(Icons.assessment),
+                      ),
+
+                      title: Text(
+                        'Rating: ${record['rating']}/5',
+                        style: const TextStyle(fontWeight: FontWeight.bold),
+                      ),
+
+                      subtitle: Text(
+                        'Review Date: ${record['review_date']}\n'
+                        '${record['comments'] ?? 'No comments'}',
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+    );
+  }
+}

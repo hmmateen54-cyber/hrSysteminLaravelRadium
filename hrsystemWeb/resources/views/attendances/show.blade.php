@@ -1,0 +1,9 @@
+<x-app-layout>
+    <x-slot name="header"><h1>Attendance record</h1><p>Employee attendance details.</p></x-slot>
+    <section class="page-intro"><div><div class="eyebrow">DAILY ATTENDANCE</div><h2 class="page-title">{{ $attendance->employee?->user?->name ?? 'Attendance record' }}</h2><p class="page-subtitle">{{ $attendance->attendance_date?->format('l, d F Y') }}</p></div><div class="page-actions"><a class="btn btn-secondary" href="{{ route('attendances.index') }}">← Attendance list</a><a class="btn btn-primary" href="{{ route('attendances.edit', $attendance) }}">Edit record</a></div></section>
+    <section class="panel" style="max-width:850px"><div class="panel-head"><div><h2 class="panel-title">Attendance details</h2><div class="panel-caption">Employee ID {{ $attendance->employee?->employee_id ?? '—' }}</div></div><span class="badge badge-{{ $attendance->status }}">{{ $attendance->status }}</span></div><div class="panel-body"><div class="detail-grid">
+        <div class="detail-item"><div class="detail-label">Employee</div><div class="detail-value">{{ $attendance->employee?->user?->name ?? 'Unknown employee' }}</div></div><div class="detail-item"><div class="detail-label">Date</div><div class="detail-value">{{ $attendance->attendance_date?->format('d M Y') ?? '—' }}</div></div>
+        <div class="detail-item"><div class="detail-label">Check in</div><div class="detail-value">{{ $attendance->check_in ? substr((string) $attendance->check_in, 0, 5) : '—' }}</div></div><div class="detail-item"><div class="detail-label">Check out</div><div class="detail-value">{{ $attendance->check_out ? substr((string) $attendance->check_out, 0, 5) : '—' }}</div></div>
+        <div class="detail-item detail-wide"><div class="detail-label">Remarks</div><div class="detail-value">{{ $attendance->remarks ?: 'No remarks.' }}</div></div>
+    </div></div></section>
+</x-app-layout>

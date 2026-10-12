@@ -1,0 +1,9 @@
+<x-app-layout>
+    <x-slot name="header"><h1>Performance review</h1><p>Review rating and employee feedback.</p></x-slot>
+    <section class="page-intro"><div><div class="eyebrow">GROWTH & DEVELOPMENT</div><h2 class="page-title">Performance review</h2><p class="page-subtitle">Review dated {{ $performance->review_date?->format('d M Y') }}</p></div><div class="page-actions"><a class="btn btn-secondary" href="{{ $isEmployeeView ? route('employee.performance.index') : route('performances.index') }}">← Reviews</a>@unless($isEmployeeView)<a class="btn btn-primary" href="{{ route('performances.edit', $performance) }}">Edit review</a>@endunless</div></section>
+    <section class="panel" style="max-width:850px"><div class="panel-head"><div><h2 class="panel-title">Review details</h2><div class="panel-caption">{{ $performance->employee?->employee_id ?? '—' }}</div></div><span class="rating">{{ number_format((float) $performance->rating, 1) }} / 5</span></div><div class="panel-body"><div class="detail-grid">
+        <div class="detail-item"><div class="detail-label">Employee</div><div class="detail-value">{{ $performance->employee?->user?->name ?? 'Unknown employee' }}</div></div><div class="detail-item"><div class="detail-label">Employee ID</div><div class="detail-value">{{ $performance->employee?->employee_id ?? '—' }}</div></div>
+        <div class="detail-item"><div class="detail-label">Review date</div><div class="detail-value">{{ $performance->review_date?->format('d M Y') }}</div></div><div class="detail-item"><div class="detail-label">Rating</div><div class="detail-value"><span class="rating">{{ number_format((float) $performance->rating, 1) }} / 5</span></div></div>
+        <div class="detail-item detail-wide"><div class="detail-label">Comments</div><div class="detail-value">{{ $performance->comments ?: 'No comments were added.' }}</div></div>
+    </div></div></section>
+</x-app-layout>
