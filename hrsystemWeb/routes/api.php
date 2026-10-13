@@ -9,8 +9,15 @@ use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\LocationEventController;
 
 Route::get('/user', function (Request $request) {
-    return $request->user();
-})->middleware('auth:sanctum');
+    $user = $request->user();
+
+    return response()->json([
+        'id' => $user->getKey(),
+        'name' => $user->name,
+        'email' => $user->email,
+        'role' => $user->role,
+    ]);
+})->middleware(['auth:sanctum', 'role:admin,hr,employee']);
 
 
 Route::get('/test', function () {
@@ -19,7 +26,8 @@ Route::get('/test', function () {
     ]);
 });
 
-Route::post('/login', [AuthController::class, 'login']);
+Route::post('/login', [AuthController::class, 'login'])->middleware('throttle:login');
+Route::post('/register', [AuthController::class, 'register'])->middleware('throttle:5,1');
 Route::middleware('auth:sanctum')->post('/logout', [AuthController::class, 'logout']);
 
 //Only Admin Routes

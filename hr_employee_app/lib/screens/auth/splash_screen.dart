@@ -7,6 +7,7 @@ import '../../components/app_error.dart';
 import '../../navigation/dashboard_router.dart';
 import '../../services/api_service.dart';
 import 'login_screen.dart';
+import 'pending_profile_screen.dart';
 
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
@@ -51,10 +52,26 @@ class _SplashScreenState extends State<SplashScreen> {
         return;
       }
 
+      if (response['status'] == 403 &&
+          ApiService.isPendingProfileResponse(response['data'])) {
+        final message = ApiService.messageFromResponse(response['data'], 403);
+        await ApiService.revokeCurrentToken();
+        await ApiService.clearSession();
+        if (mounted) {
+          setState(
+            () => restoredScreen = PendingProfileScreen(message: message),
+          );
+        }
+        return;
+      }
+
       if (!ApiService.isSuccess(response['status'])) {
         if (mounted) {
           setState(() {
-            error = ApiService.messageForStatus(response['status']);
+            error = ApiService.messageFromResponse(
+              response['data'],
+              response['status'],
+            );
           });
         }
         return;

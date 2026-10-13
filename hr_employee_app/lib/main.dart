@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'screens/auth/login_screen.dart';
+import 'screens/auth/pending_profile_screen.dart';
 import 'services/api_service.dart';
 import 'screens/auth/splash_screen.dart';
 import 'theme/app_theme.dart';
@@ -14,6 +15,14 @@ void main() {
   ApiService.onUnauthorized = () async {
     navigatorKey.currentState?.pushAndRemoveUntil(
       MaterialPageRoute(builder: (context) => const LoginScreen()),
+      (route) => false,
+    );
+  };
+  ApiService.onPendingProfile = (message) async {
+    navigatorKey.currentState?.pushAndRemoveUntil(
+      MaterialPageRoute(
+        builder: (context) => PendingProfileScreen(message: message),
+      ),
       (route) => false,
     );
   };

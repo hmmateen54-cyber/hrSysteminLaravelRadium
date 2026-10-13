@@ -44,20 +44,32 @@ class EmployeeController extends Controller
             'salary' => ['nullable', 'numeric', 'min:0'],
         ]);
 
-        DB::transaction(function () use ($validated) {
+        $activated = DB::transaction(function () use ($validated) {
             $user = User::create([
                 'name' => $validated['name'],
                 'email' => $validated['email'],
                 'password' => Hash::make($validated['password']),
                 'role' => 'employee',
+                'account_status' => 'pending',
             ]);
 
-            $user->employee()->create(collect($validated)->only([
+            $employee = $user->employee()->create(collect($validated)->only([
                 'employee_id', 'phone', 'department', 'designation', 'joining_date', 'salary',
             ])->all());
+
+            if ($employee->hasCompleteProfile()) {
+                $user->forceFill(['account_status' => 'active'])->save();
+            }
+
+            return $user->account_status === 'active';
         });
 
-        return redirect()->route('employees.index')->with('success', 'Employee created successfully.');
+        return redirect()->route('employees.index')->with(
+            'success',
+            $activated
+                ? 'Employee created and activated successfully.'
+                : 'Employee created. The account remains pending until HR completes the required profile fields.'
+        );
     }
 
     /**
@@ -99,16 +111,31 @@ class EmployeeController extends Controller
         $user = $employee->user;
         abort_if(!$user, 404);
 
-        DB::transaction(function () use ($employee, $user, $validated) {
+        $activated = DB::transaction(function () use ($employee, $user, $validated) {
             $user->update(collect($validated)->only(['name', 'email'])->all());
             $employee->update(collect($validated)->only([
                 'employee_id', 'phone', 'department', 'designation', 'joining_date', 'salary',
             ])->all());
+
+            if ($user->account_status === 'pending' && $employee->fresh()->hasCompleteProfile()) {
+                $user->forceFill(['account_status' => 'active'])->save();
+
+                return true;
+            }
+
+            return false;
         });
 
         return redirect()
             ->route('employees.index')
-            ->with('success', 'Employee updated successfully.');
+            ->with(
+                'success',
+                $activated
+                    ? 'Employee profile completed and account activated successfully.'
+                    : ($user->account_status === 'pending'
+                        ? 'Employee updated. The account remains pending until HR completes the required profile fields.'
+                        : 'Employee updated successfully.')
+            );
     }
 
     /**

@@ -1,7 +1,7 @@
 <x-app-layout>
     <x-slot name="header"><h1>Edit employee</h1><p>Update employee contact and profile details.</p></x-slot>
     <section class="page-intro"><div><div class="eyebrow">PEOPLE DIRECTORY</div><h2 class="page-title">Edit {{ $employee->user?->name ?? 'employee' }}</h2><p class="page-subtitle">Changes to the profile are saved with its linked account.</p></div><a class="btn btn-secondary" href="{{ route('employees.show', $employee) }}">← Employee profile</a></section>
-    <section class="panel form-panel"><div class="panel-head"><div><h2 class="panel-title">Employee information</h2></div></div><div class="panel-body">
+    <section class="panel form-panel"><div class="panel-head"><div><h2 class="panel-title">Employee information</h2><div class="panel-caption">Employee ID, phone, department, designation, and joining date are required for account activation. Salary is optional.</div></div></div><div class="panel-body">
         <form action="{{ route('employees.update', $employee) }}" method="POST">@csrf @method('PUT')
             <div class="form-grid">
                 <div class="field"><label for="name">Full name</label><input id="name" name="name" value="{{ old('name', $employee->user?->name) }}" required>@error('name')<p class="field-error">{{ $message }}</p>@enderror</div>

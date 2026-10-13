@@ -20,6 +20,14 @@ Route::get('/', function () {
 })->name('home');
 
 Route::middleware(['auth'])->group(function () {
+    Route::get('/employee/pending-profile', function () {
+        if (!auth()->user()->isInactiveEmployee()) {
+            return redirect()->route('dashboard');
+        }
+
+        return view('employees.pending-profile');
+    })->name('employee.pending-profile');
+
     Route::get('/dashboard', [DashboardController::class, 'index'])->name('dashboard');
 
     Route::middleware('role:admin')->get('/admin', [DashboardController::class, 'admin'])->name('admin.dashboard');
@@ -52,6 +60,7 @@ Route::middleware(['auth'])->group(function () {
 
 // Practice Routes
 
+Route::middleware(['auth', 'role:admin,hr'])->group(function () {
 Route::get('/query-practice' , [PracticeController::class , 'queryPractice']);
 Route::get('/query-practice' , [PracticeController::class , 'queryPractice1']);
 Route::get('/query-practice' , [PracticeController::class , 'queryPractice2']);
@@ -83,3 +92,4 @@ Route::get('/query-practice2' , [Practice2Controller::class , 'eloquentPractice2
 Route::get('/query-practice2' , [Practice2Controller::class , 'eloquentPractice3']);
 Route::get('/query-practice2' , [Practice2Controller::class , 'eloquentPractice4']);
 Route::get('/query-practice2' , [Practice2Controller::class , 'eloquentPractice5']);
+});

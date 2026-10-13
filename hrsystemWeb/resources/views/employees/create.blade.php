@@ -1,7 +1,7 @@
 <x-app-layout>
     <x-slot name="header"><h1>Add employee</h1><p>Create an employee account and profile.</p></x-slot>
     <section class="page-intro"><div><div class="eyebrow">PEOPLE DIRECTORY</div><h2 class="page-title">Add employee</h2><p class="page-subtitle">A sign-in account and linked employee profile will be created together.</p></div><a class="btn btn-secondary" href="{{ route('employees.index') }}">← Back to employees</a></section>
-    <section class="panel form-panel"><div class="panel-head"><div><h2 class="panel-title">Employee information</h2><div class="panel-caption">Fields marked required must be completed.</div></div></div><div class="panel-body">
+    <section class="panel form-panel"><div class="panel-head"><div><h2 class="panel-title">Employee information</h2><div class="panel-caption">Employee ID, phone, department, designation, and joining date are required for account activation. Salary is optional.</div></div></div><div class="panel-body">
         <form action="{{ route('employees.store') }}" method="POST">@csrf
             <div class="form-grid">
                 <div class="field"><label for="name">Full name</label><input id="name" name="name" value="{{ old('name') }}" autocomplete="name" required>@error('name')<p class="field-error">{{ $message }}</p>@enderror</div>

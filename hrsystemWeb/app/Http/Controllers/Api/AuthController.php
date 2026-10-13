@@ -3,11 +3,38 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\User;
+use App\Services\EmployeeRegistrationService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Validation\Rule;
 
 class AuthController extends Controller
 {
+    private const PENDING_PROFILE_MESSAGE = 'Your account is registered, but your employee profile is awaiting HR completion. You will be able to log in once HR completes your profile.';
+
+    public function register(Request $request, EmployeeRegistrationService $registration)
+    {
+        $validated = $request->validate([
+            'name' => ['required', 'string', 'max:255'],
+            'email' => ['required', 'string', 'email', 'max:255', Rule::unique('users', 'email')],
+            'password' => ['required', 'string', 'min:8', 'confirmed'],
+        ]);
+
+        $user = $registration->register($validated);
+
+        return response()->json([
+            'message' => self::PENDING_PROFILE_MESSAGE,
+            'account_status' => 'pending',
+            'user' => [
+                'id' => $user->getKey(),
+                'name' => $user->name,
+                'email' => $user->email,
+                'role' => $user->role,
+            ],
+        ], 201);
+    }
+
     public function login(Request $request)
     {
         $request->validate([
@@ -15,15 +42,21 @@ class AuthController extends Controller
             'password' => 'required',
         ]);
 
-        $user = \App\Models\User::where(
+        $user = User::where(
             'email',
             $request->email
         )->first();
 
-        if (!$user || !Hash::check($request->password, $user->password)) {
+        if (! $user || ! Hash::check($request->password, $user->password)) {
             return response()->json([
-                'message' => 'Invalid email or password'
+                'message' => 'Invalid email or password',
             ], 401);
+        }
+
+        if ($user->isInactiveEmployee()) {
+            return response()->json([
+                'message' => self::PENDING_PROFILE_MESSAGE,
+            ], 403);
         }
 
         $token = $user->createToken('flutter-app')->plainTextToken;

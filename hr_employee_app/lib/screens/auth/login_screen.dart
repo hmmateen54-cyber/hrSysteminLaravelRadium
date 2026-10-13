@@ -7,11 +7,13 @@ import '../../services/api_service.dart';
 import 'dart:convert';
 import '../../navigation/dashboard_router.dart';
 import '../../services/offline_sync_service.dart';
+import 'register_screen.dart';
 
 class LoginScreen extends StatefulWidget {
   final String? logoutMessage;
+  final String? initialMessage;
 
-  const LoginScreen({super.key, this.logoutMessage});
+  const LoginScreen({super.key, this.logoutMessage, this.initialMessage});
 
   @override
   State<LoginScreen> createState() => _LoginScreenState();
@@ -26,7 +28,7 @@ class _LoginScreenState extends State<LoginScreen> {
   @override
   void initState() {
     super.initState();
-    final message = widget.logoutMessage;
+    final message = widget.initialMessage ?? widget.logoutMessage;
     if (message != null) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) {
@@ -39,6 +41,14 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   Future<void> login() async {
+    if (emailController.text.trim().isEmpty ||
+        passwordController.text.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Enter your email and password.')),
+      );
+      return;
+    }
+
     setState(() {
       loading = true;
     });
@@ -107,6 +117,13 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   @override
+  void dispose() {
+    emailController.dispose();
+    passwordController.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('HR Management')),
@@ -116,7 +133,6 @@ class _LoginScreenState extends State<LoginScreen> {
 
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
-
           children: [
             const Text(
               'Employee Login',
@@ -142,6 +158,15 @@ class _LoginScreenState extends State<LoginScreen> {
             const SizedBox(height: 24),
 
             AppButton(text: 'Login', loading: loading, onPressed: login),
+            const SizedBox(height: 16),
+            TextButton(
+              onPressed: loading
+                  ? null
+                  : () => Navigator.of(context).push(
+                      MaterialPageRoute(builder: (_) => const RegisterScreen()),
+                    ),
+              child: const Text('Create an employee account'),
+            ),
           ],
         ),
       ),

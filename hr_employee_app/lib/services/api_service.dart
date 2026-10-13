@@ -8,8 +8,12 @@ import '../config/api.dart';
 
 class ApiService {
   static Future<void> Function()? onUnauthorized;
+  static Future<void> Function(String message)? onPendingProfile;
   static bool _unauthorizedCallbackRunning = false;
+  static bool _pendingProfileCallbackRunning = false;
   static const _timeout = Duration(seconds: 20);
+  static const pendingProfileMessage =
+      'Your account is registered, but your employee profile is awaiting HR completion. You will be able to log in once HR completes your profile.';
 
   static Future<Map<String, dynamic>> get(
     String endpoint, {
@@ -49,10 +53,13 @@ class ApiService {
     Map<String, dynamic>? body,
     bool handleUnauthorized = true,
     bool authenticated = true,
+    String? explicitToken,
     Duration requestTimeout = _timeout,
   }) async {
     final prefs = await SharedPreferences.getInstance();
-    final token = authenticated ? prefs.getString('token') : null;
+    final token = authenticated
+        ? (explicitToken ?? prefs.getString('token'))
+        : null;
     final headers = <String, String>{'Accept': 'application/json'};
 
     if (body != null) headers['Content-Type'] = 'application/json';
@@ -86,6 +93,14 @@ class ApiService {
     }
 
     final data = _decodeBody(response.body);
+    if (response.statusCode == 403 &&
+        authenticated &&
+        handleUnauthorized &&
+        token != null &&
+        isPendingProfileResponse(data)) {
+      await _handlePendingProfile(token, messageFromResponse(data, 403));
+    }
+
     if (response.statusCode == 401 && authenticated && handleUnauthorized) {
       await clearSession();
       if (!_unauthorizedCallbackRunning) {
@@ -120,6 +135,75 @@ class ApiService {
         authenticated: false,
         handleUnauthorized: false,
       );
+
+  static Future<Map<String, dynamic>> register({
+    required String name,
+    required String email,
+    required String password,
+    required String passwordConfirmation,
+  }) => _request(
+    'POST',
+    '/register',
+    body: {
+      'name': name,
+      'email': email,
+      'password': password,
+      'password_confirmation': passwordConfirmation,
+    },
+    authenticated: false,
+    handleUnauthorized: false,
+  );
+
+  static bool isPendingProfileResponse(dynamic data) =>
+      data is Map && data['message'] == pendingProfileMessage;
+
+  static String messageFromResponse(dynamic data, dynamic status) {
+    if (data is Map) {
+      final message = data['message'];
+      if (message is String && message.trim().isNotEmpty) return message;
+
+      final errors = data['errors'];
+      if (errors is Map) {
+        for (final value in errors.values) {
+          if (value is List && value.isNotEmpty) return value.first.toString();
+        }
+      }
+    }
+
+    return messageForStatus(status);
+  }
+
+  static Future<void> _handlePendingProfile(
+    String requestToken,
+    String message,
+  ) async {
+    if (_pendingProfileCallbackRunning) return;
+
+    final prefs = await SharedPreferences.getInstance();
+    if (prefs.getString('token') != requestToken) return;
+
+    _pendingProfileCallbackRunning = true;
+    try {
+      try {
+        await _request(
+          'POST',
+          '/logout',
+          body: const {},
+          handleUnauthorized: false,
+          explicitToken: requestToken,
+          requestTimeout: const Duration(seconds: 8),
+        );
+      } catch (_) {
+        // The pending account is blocked on the server even if revocation is offline.
+      }
+
+      if (prefs.getString('token') != requestToken) return;
+      await clearSession();
+      await onPendingProfile?.call(message);
+    } finally {
+      _pendingProfileCallbackRunning = false;
+    }
+  }
 
   static Future<Map<String, dynamic>?> revokeCurrentToken() async {
     final token = await getStoredToken();

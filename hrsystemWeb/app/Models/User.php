@@ -10,7 +10,6 @@ use Illuminate\Notifications\Notifiable;
 use Laravel\Fortify\TwoFactorAuthenticatable;
 use Laravel\Jetstream\HasProfilePhoto;
 use Laravel\Sanctum\HasApiTokens;
-use App\Models\Employee;
 
 class User extends Authenticatable
 {
@@ -33,12 +32,28 @@ class User extends Authenticatable
         'email',
         'password',
         'role',
+        'account_status',
     ];
 
     public function employee()
     {
         return $this->hasOne(Employee::class, 'user_id');
     }
+
+    public function isPendingEmployee(): bool
+    {
+        return $this->role === 'employee' && $this->account_status === 'pending';
+    }
+
+    public function isInactiveEmployee(): bool
+    {
+        // A null value on a just-created model still means the database default
+        // applies; the column is non-nullable and only pending is non-active.
+        return $this->role === 'employee'
+            && $this->account_status !== null
+            && $this->account_status !== 'active';
+    }
+
     /**
      * The attributes that should be hidden for serialization.
      *
