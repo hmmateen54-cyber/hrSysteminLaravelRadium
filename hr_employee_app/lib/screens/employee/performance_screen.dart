@@ -3,6 +3,7 @@ import '../../components/logout_action.dart';
 import '../../components/app_error.dart';
 import '../../components/app_loader.dart';
 import '../../services/api_service.dart';
+import '../../services/auto_refresh_controller.dart';
 
 class PerformanceScreen extends StatefulWidget {
   const PerformanceScreen({super.key});
@@ -12,35 +13,48 @@ class PerformanceScreen extends StatefulWidget {
 }
 
 class _PerformanceScreenState extends State<PerformanceScreen> {
+  late final AutoRefreshController _autoRefresh;
+  bool _requestInFlight = false;
+  bool _hasLoaded = false;
   List<dynamic> performance = [];
   bool loading = true;
   String? error;
 
   Future<void> getPerformance() async {
-    setState(() {
-      loading = true;
-      error = null;
-    });
+    if (!mounted || _requestInFlight) return;
+    _requestInFlight = true;
+    if (!_hasLoaded && !loading) setState(() => loading = true);
 
     try {
       final response = await ApiService.get('/employee/performance');
+      if (!mounted) return;
 
       if (ApiService.isSuccess(response['status'])) {
         setState(() {
           performance = response['data']['performance'];
           loading = false;
+          error = null;
+          _hasLoaded = true;
         });
       } else {
         setState(() {
           loading = false;
-          error = response['data']['message'] ?? 'Failed to load performance';
+          if (!_hasLoaded) {
+            error = response['data']['message'] ?? 'Failed to load performance';
+          }
+          _hasLoaded = true;
         });
       }
     } catch (e) {
-      setState(() {
-        loading = false;
-        error = 'Unable to connect to server';
-      });
+      if (mounted) {
+        setState(() {
+          loading = false;
+          if (!_hasLoaded) error = 'Unable to connect to server';
+          _hasLoaded = true;
+        });
+      }
+    } finally {
+      _requestInFlight = false;
     }
   }
 
@@ -48,7 +62,15 @@ class _PerformanceScreenState extends State<PerformanceScreen> {
   void initState() {
     super.initState();
 
+    _autoRefresh = AutoRefreshController(owner: this, onRefresh: getPerformance)
+      ..start();
     getPerformance();
+  }
+
+  @override
+  void dispose() {
+    _autoRefresh.dispose();
+    super.dispose();
   }
 
   @override

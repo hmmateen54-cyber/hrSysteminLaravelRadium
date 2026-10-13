@@ -391,73 +391,60 @@ Route::middleware(['auth:sanctum', 'role:employee'])
             'sync_id' => 'nullable|uuid',
         ]);
 
-        // If this exact offline request was already accepted,
-        // return the existing record instead of creating another.
-        if (!empty($validated['sync_id'])) {
-            $existingSync = $employee->attendances()
-                ->where('sync_id', $validated['sync_id'])
-                ->first();
+        return \Illuminate\Support\Facades\DB::transaction(function () use ($employee, $validated) {
+            // Serialize attendance writes for this employee while checking the
+            // one-per-day rule. The same employee lock is used by the web form.
+            $employee = Employee::query()
+                ->whereKey($employee->getKey())
+                ->lockForUpdate()
+                ->firstOrFail();
 
-            if ($existingSync) {
-                $samePayload =
-                    $existingSync->attendance_date->toDateString()
-                        === $validated['attendance_date']
-                    && (string) $existingSync->check_in
-                        === $validated['check_in']
-                    && (
-                        $existingSync->latitude === null
-                            ? ($validated['latitude'] ?? null) === null
-                            : (
-                                $validated['latitude'] !== null
-                                && (float) $existingSync->latitude
-                                    === (float) $validated['latitude']
-                            )
-                    )
-                    && (
-                        $existingSync->longitude === null
-                            ? ($validated['longitude'] ?? null) === null
-                            : (
-                                $validated['longitude'] !== null
-                                && (float) $existingSync->longitude
-                                    === (float) $validated['longitude']
-                            )
-                    );
+            // If this exact offline request was already accepted,
+            // return the existing record instead of creating another.
+            if (!empty($validated['sync_id'])) {
+                $existingSync = $employee->attendances()
+                    ->where('sync_id', $validated['sync_id'])
+                    ->first();
 
-                if (!$samePayload) {
+                if ($existingSync) {
+                    $samePayload =
+                        $existingSync->attendance_date->toDateString()
+                            === $validated['attendance_date']
+                        && (string) $existingSync->check_in
+                            === $validated['check_in']
+                        && (
+                            $existingSync->latitude === null
+                                ? ($validated['latitude'] ?? null) === null
+                                : (
+                                    $validated['latitude'] !== null
+                                    && (float) $existingSync->latitude
+                                        === (float) $validated['latitude']
+                                )
+                        )
+                        && (
+                            $existingSync->longitude === null
+                                ? ($validated['longitude'] ?? null) === null
+                                : (
+                                    $validated['longitude'] !== null
+                                    && (float) $existingSync->longitude
+                                        === (float) $validated['longitude']
+                                )
+                        );
+
+                    if (!$samePayload) {
+                        return response()->json([
+                            'message' => 'This sync ID was already used for different attendance details.',
+                        ], 409);
+                    }
+
                     return response()->json([
-                        'message' => 'This sync ID was already used for different attendance details.',
-                    ], 409);
+                        'message' => 'Attendance was already synced.',
+                        'attendance' => $existingSync,
+                    ], 200);
                 }
-
-                return response()->json([
-                    'message' => 'Attendance was already synced.',
-                    'attendance' => $existingSync,
-                ], 200);
             }
-        }
 
-        // One attendance per employee per date.
-        $existingDate = $employee->attendances()
-            ->whereDate('attendance_date', $validated['attendance_date'])
-            ->first();
-
-        if ($existingDate) {
-            return response()->json([
-                'message' => 'Attendance has already been marked for this date.',
-            ], 409);
-        }
-
-        try {
-            $attendance = $employee->attendances()->create([
-                'attendance_date' => $validated['attendance_date'],
-                'check_in' => $validated['check_in'],
-                'status' => 'present',
-                'latitude' => $validated['latitude'] ?? null,
-                'longitude' => $validated['longitude'] ?? null,
-                'sync_id' => $validated['sync_id'] ?? null,
-            ]);
-        } catch (\Illuminate\Database\QueryException $exception) {
-            // Another request may have inserted the same date first.
+            // One attendance per employee per date.
             $existingDate = $employee->attendances()
                 ->whereDate('attendance_date', $validated['attendance_date'])
                 ->first();
@@ -468,13 +455,35 @@ Route::middleware(['auth:sanctum', 'role:employee'])
                 ], 409);
             }
 
-            throw $exception;
-        }
+            try {
+                $attendance = $employee->attendances()->create([
+                    'attendance_date' => $validated['attendance_date'],
+                    'check_in' => $validated['check_in'],
+                    'status' => 'present',
+                    'latitude' => $validated['latitude'] ?? null,
+                    'longitude' => $validated['longitude'] ?? null,
+                    'sync_id' => $validated['sync_id'] ?? null,
+                ]);
+            } catch (\Illuminate\Database\QueryException $exception) {
+                // Another request may have inserted the same date first.
+                $existingDate = $employee->attendances()
+                    ->whereDate('attendance_date', $validated['attendance_date'])
+                    ->first();
 
-        return response()->json([
-            'message' => 'Attendance marked successfully.',
-            'attendance' => $attendance,
-        ], 201);
+                if ($existingDate) {
+                    return response()->json([
+                        'message' => 'Attendance has already been marked for this date.',
+                    ], 409);
+                }
+
+                throw $exception;
+            }
+
+            return response()->json([
+                'message' => 'Attendance marked successfully.',
+                'attendance' => $attendance,
+            ], 201);
+        });
     });
 
 
@@ -547,7 +556,7 @@ Route::middleware(['auth:sanctum', 'role:employee'])->post('/employee/leaves', f
         'start_date' => 'required|date',
         'end_date' => 'required|date|after_or_equal:start_date',
         'leave_type' => 'required|string|max:255',
-        'reason' => 'nullable|string',
+    'reason' => 'nullable|string|max:5000',
         'sync_id' => 'nullable|uuid',
     ]);
 

@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../components/logout_action.dart';
 import 'admin_add_performance_screen.dart';
 import '../../services/api_service.dart';
+import '../../services/auto_refresh_controller.dart';
 import '../../components/app_loader.dart';
 import '../../components/app_error.dart';
 
@@ -14,6 +15,9 @@ class AdminPerformanceScreen extends StatefulWidget {
 }
 
 class _AdminPerformanceScreenState extends State<AdminPerformanceScreen> {
+  late final AutoRefreshController _autoRefresh;
+  bool _requestInFlight = false;
+  bool _hasLoaded = false;
   Future<void> deletePerformance(int id) async {
     final confirm = await showDialog<bool>(
       context: context,
@@ -82,35 +86,53 @@ class _AdminPerformanceScreenState extends State<AdminPerformanceScreen> {
   @override
   void initState() {
     super.initState();
+    _autoRefresh = AutoRefreshController(owner: this, onRefresh: getPerformance)
+      ..start();
     getPerformance();
   }
 
   Future<void> getPerformance() async {
-    setState(() {
-      loading = true;
-      error = null;
-    });
+    if (!mounted || _requestInFlight) return;
+    _requestInFlight = true;
+    if (!_hasLoaded && !loading) setState(() => loading = true);
 
     try {
       final response = await ApiService.get('/admin/performance');
+      if (!mounted) return;
 
       if (ApiService.isSuccess(response['status'])) {
         setState(() {
           performance = response['data']['performance'] ?? [];
           loading = false;
+          error = null;
+          _hasLoaded = true;
         });
       } else {
         setState(() {
-          error = response['data']['message'] ?? 'Failed to load performance';
+          if (!_hasLoaded) {
+            error = response['data']['message'] ?? 'Failed to load performance';
+          }
           loading = false;
+          _hasLoaded = true;
         });
       }
     } catch (e) {
-      setState(() {
-        error = 'Something went wrong';
-        loading = false;
-      });
+      if (mounted) {
+        setState(() {
+          if (!_hasLoaded) error = 'Something went wrong';
+          loading = false;
+          _hasLoaded = true;
+        });
+      }
+    } finally {
+      _requestInFlight = false;
     }
+  }
+
+  @override
+  void dispose() {
+    _autoRefresh.dispose();
+    super.dispose();
   }
 
   @override

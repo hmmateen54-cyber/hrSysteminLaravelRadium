@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../../components/logout_action.dart';
 
 import '../../services/api_service.dart';
+import '../../services/auto_refresh_controller.dart';
 import '../../components/app_loader.dart';
 import '../../components/app_error.dart';
 
@@ -13,6 +14,9 @@ class AdminAttendanceScreen extends StatefulWidget {
 }
 
 class _AdminAttendanceScreenState extends State<AdminAttendanceScreen> {
+  late final AutoRefreshController _autoRefresh;
+  bool _requestInFlight = false;
+  bool _hasLoaded = false;
   List<dynamic> attendance = [];
 
   bool loading = true;
@@ -21,35 +25,53 @@ class _AdminAttendanceScreenState extends State<AdminAttendanceScreen> {
   @override
   void initState() {
     super.initState();
+    _autoRefresh = AutoRefreshController(owner: this, onRefresh: getAttendance)
+      ..start();
     getAttendance();
   }
 
   Future<void> getAttendance() async {
-    setState(() {
-      loading = true;
-      error = null;
-    });
+    if (!mounted || _requestInFlight) return;
+    _requestInFlight = true;
+    if (!_hasLoaded && !loading) setState(() => loading = true);
 
     try {
       final response = await ApiService.get('/admin/attendance');
+      if (!mounted) return;
 
       if (ApiService.isSuccess(response['status'])) {
         setState(() {
           attendance = response['data']['attendance'] ?? [];
           loading = false;
+          error = null;
+          _hasLoaded = true;
         });
       } else {
         setState(() {
-          error = response['data']['message'] ?? 'Failed to load attendance';
+          if (!_hasLoaded) {
+            error = response['data']['message'] ?? 'Failed to load attendance';
+          }
           loading = false;
+          _hasLoaded = true;
         });
       }
     } catch (e) {
-      setState(() {
-        error = 'Something went wrong';
-        loading = false;
-      });
+      if (mounted) {
+        setState(() {
+          if (!_hasLoaded) error = 'Something went wrong';
+          loading = false;
+          _hasLoaded = true;
+        });
+      }
+    } finally {
+      _requestInFlight = false;
     }
+  }
+
+  @override
+  void dispose() {
+    _autoRefresh.dispose();
+    super.dispose();
   }
 
   @override

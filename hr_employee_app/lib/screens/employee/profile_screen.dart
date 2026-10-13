@@ -3,6 +3,7 @@ import '../../components/logout_action.dart';
 import '../../components/app_error.dart';
 import '../../components/app_loader.dart';
 import '../../services/api_service.dart';
+import '../../services/auto_refresh_controller.dart';
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
@@ -12,6 +13,9 @@ class ProfileScreen extends StatefulWidget {
 }
 
 class _ProfileScreenState extends State<ProfileScreen> {
+  late final AutoRefreshController _autoRefresh;
+  bool _requestInFlight = false;
+  bool _hasLoaded = false;
   Map<String, dynamic>? user;
   Map<String, dynamic>? employee;
 
@@ -19,13 +23,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
   String? error;
 
   Future<void> getProfile() async {
-    setState(() {
-      loading = true;
-      error = null;
-    });
+    if (!mounted || _requestInFlight) return;
+    _requestInFlight = true;
+    if (!_hasLoaded && !loading) setState(() => loading = true);
 
     try {
       final response = await ApiService.get('/employee/profile');
+      if (!mounted) return;
 
       if (ApiService.isSuccess(response['status'])) {
         final data = response['data'];
@@ -34,18 +38,28 @@ class _ProfileScreenState extends State<ProfileScreen> {
           user = data['user'];
           employee = data['employee'];
           loading = false;
+          error = null;
+          _hasLoaded = true;
         });
       } else {
         setState(() {
           loading = false;
-          error = response['data']['message'] ?? 'Failed to load profile';
+          if (!_hasLoaded) {
+            error = response['data']['message'] ?? 'Failed to load profile';
+          }
+          _hasLoaded = true;
         });
       }
     } catch (e) {
-      setState(() {
-        loading = false;
-        error = 'Unable to connect to server';
-      });
+      if (mounted) {
+        setState(() {
+          loading = false;
+          if (!_hasLoaded) error = 'Unable to connect to server';
+          _hasLoaded = true;
+        });
+      }
+    } finally {
+      _requestInFlight = false;
     }
   }
 
@@ -53,7 +67,15 @@ class _ProfileScreenState extends State<ProfileScreen> {
   void initState() {
     super.initState();
 
+    _autoRefresh = AutoRefreshController(owner: this, onRefresh: getProfile)
+      ..start();
     getProfile();
+  }
+
+  @override
+  void dispose() {
+    _autoRefresh.dispose();
+    super.dispose();
   }
 
   @override

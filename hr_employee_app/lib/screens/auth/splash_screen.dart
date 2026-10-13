@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -6,6 +7,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../../components/app_error.dart';
 import '../../navigation/dashboard_router.dart';
 import '../../services/api_service.dart';
+import '../../services/offline_sync_service.dart';
 import 'login_screen.dart';
 import 'pending_profile_screen.dart';
 
@@ -66,6 +68,10 @@ class _SplashScreenState extends State<SplashScreen> {
       }
 
       if (!ApiService.isSuccess(response['status'])) {
+        final status = response['status'];
+        if (status == 429 || (status is int && status >= 500)) {
+          if (await _restoreCachedSession()) return;
+        }
         if (mounted) {
           setState(() {
             error = ApiService.messageFromResponse(
@@ -90,6 +96,7 @@ class _SplashScreenState extends State<SplashScreen> {
 
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString('user', jsonEncode(user));
+      unawaited(OfflineSyncService.syncPendingLeaves());
       final destination = dashboardForUser(user);
       if (mounted) {
         setState(() {
@@ -98,7 +105,7 @@ class _SplashScreenState extends State<SplashScreen> {
       }
     } catch (_) {
       // Network and timeout errors do not invalidate or erase the stored token.
-      if (mounted) {
+      if (!await _restoreCachedSession() && mounted) {
         setState(() {
           error =
               'Unable to reach the server. Your saved session is still on this device.';
@@ -106,6 +113,26 @@ class _SplashScreenState extends State<SplashScreen> {
       }
     } finally {
       if (mounted) setState(() => loading = false);
+    }
+  }
+
+  Future<bool> _restoreCachedSession() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final serializedUser = prefs.getString('user');
+      if (serializedUser == null) return false;
+      final user = userFromJson(jsonDecode(serializedUser));
+      final destination = user == null ? null : dashboardForUser(user);
+      if (destination == null || !mounted) return false;
+
+      unawaited(OfflineSyncService.syncPendingLeaves());
+      setState(() {
+        error = null;
+        restoredScreen = destination;
+      });
+      return true;
+    } catch (_) {
+      return false;
     }
   }
 

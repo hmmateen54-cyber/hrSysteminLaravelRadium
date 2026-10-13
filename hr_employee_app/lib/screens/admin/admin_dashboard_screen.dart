@@ -1,9 +1,12 @@
+import 'dart:async';
+
 import 'admin_leaves_screen.dart';
 import 'admin_employees_screen.dart';
 import 'package:flutter/material.dart';
 import '../../components/logout_action.dart';
 import '../../components/dashboard_card.dart';
 import '../../services/api_service.dart';
+import '../../services/auto_refresh_controller.dart';
 import '../../components/app_loader.dart';
 import '../../components/app_error.dart';
 import 'admin_attendance_screen.dart';
@@ -17,6 +20,10 @@ class AdminDashboardScreen extends StatefulWidget {
 }
 
 class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
+  late final AutoRefreshController _autoRefresh;
+  bool _requestInFlight = false;
+  bool _refreshQueued = false;
+  bool _hasData = false;
   int totalUsers = 0;
   int totalEmployees = 0;
   int totalHr = 0;
@@ -30,15 +37,21 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   @override
   void initState() {
     super.initState();
+    _autoRefresh = AutoRefreshController(
+      owner: this,
+      onRefresh: getDashboardData,
+    )..start();
     getDashboardData();
   }
 
   Future<void> getDashboardData() async {
     if (!mounted) return;
-    setState(() {
-      loading = true;
-      error = null;
-    });
+    if (_requestInFlight) {
+      _refreshQueued = true;
+      return;
+    }
+    _requestInFlight = true;
+    if (!_hasData && !loading) setState(() => loading = true);
 
     try {
       final response = await ApiService.get('/admin/dashboard');
@@ -55,28 +68,43 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
           approvedLeaves = _count(data['approved_leaves']);
           rejectedLeaves = _count(data['rejected_leaves']);
           loading = false;
+          error = null;
+          _hasData = true;
         });
       } else {
         if (!mounted) return;
         setState(() {
           final data = response['data'];
-          error = data is Map
+          final message = data is Map
               ? data['message']?.toString() ?? 'Failed to load dashboard'
               : ApiService.messageForStatus(response['status']);
           loading = false;
+          if (!_hasData) error = message;
         });
       }
     } catch (e) {
       if (!mounted) return;
       setState(() {
-        error = 'Something went wrong';
+        if (!_hasData) error = 'Something went wrong';
         loading = false;
       });
+    } finally {
+      _requestInFlight = false;
+      if (_refreshQueued && mounted) {
+        _refreshQueued = false;
+        unawaited(Future<void>.delayed(Duration.zero, getDashboardData));
+      }
     }
   }
 
   int _count(dynamic value) =>
       value is int ? value : int.tryParse('$value') ?? 0;
+
+  @override
+  void dispose() {
+    _autoRefresh.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {

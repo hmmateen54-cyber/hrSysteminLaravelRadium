@@ -29,6 +29,8 @@ Route::middleware(['auth'])->group(function () {
     })->name('employee.pending-profile');
 
     Route::get('/dashboard', [DashboardController::class, 'index'])->name('dashboard');
+    Route::get('/dashboard/snapshot', [DashboardController::class, 'snapshot'])
+        ->name('dashboard.snapshot');
 
     Route::middleware('role:admin')->get('/admin', [DashboardController::class, 'admin'])->name('admin.dashboard');
     Route::middleware('role:admin,hr')->get('/hr', [DashboardController::class, 'hr'])->name('hr.dashboard');

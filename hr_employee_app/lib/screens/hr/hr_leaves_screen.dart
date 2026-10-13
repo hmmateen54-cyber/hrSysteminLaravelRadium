@@ -4,6 +4,7 @@ import '../../components/logout_action.dart';
 import '../../components/app_error.dart';
 import '../../components/app_loader.dart';
 import '../../services/api_service.dart';
+import '../../services/auto_refresh_controller.dart';
 
 class HRLeavesScreen extends StatefulWidget {
   const HRLeavesScreen({super.key});
@@ -13,6 +14,9 @@ class HRLeavesScreen extends StatefulWidget {
 }
 
 class _HRLeavesScreenState extends State<HRLeavesScreen> {
+  late final AutoRefreshController _autoRefresh;
+  bool _requestInFlight = false;
+  int _mutationRevision = 0;
   bool loading = true;
   String? error;
 
@@ -22,42 +26,54 @@ class _HRLeavesScreenState extends State<HRLeavesScreen> {
   @override
   void initState() {
     super.initState();
+    _autoRefresh = AutoRefreshController(owner: this, onRefresh: loadLeaves)
+      ..start();
     loadLeaves();
   }
 
   Future<void> loadLeaves() async {
-    if (!mounted) return;
-    setState(() {
-      loading = true;
-      error = null;
-    });
+    if (!mounted || _requestInFlight) return;
+    _requestInFlight = true;
+    final requestRevision = _mutationRevision;
+    if (leaves.isEmpty && !loading) setState(() => loading = true);
 
     try {
       final response = await ApiService.get('/hr/leaves');
 
+      if (!mounted || requestRevision != _mutationRevision) return;
+
       if (ApiService.isSuccess(response['status']) && response['data'] is Map) {
-        if (!mounted) return;
         setState(() {
           leaves = response['data']['leaves'] ?? [];
           loading = false;
+          error = null;
         });
       } else {
         if (!mounted) return;
         setState(() {
           final data = response['data'];
-          error = data is Map
+          final message = data is Map
               ? data['message']?.toString() ?? 'Failed to load leaves'
               : ApiService.messageForStatus(response['status']);
           loading = false;
+          if (leaves.isEmpty) error = message;
         });
       }
     } catch (e) {
-      if (!mounted) return;
+      if (!mounted || requestRevision != _mutationRevision) return;
       setState(() {
-        error = 'Something went wrong';
+        if (leaves.isEmpty) error = 'Something went wrong';
         loading = false;
       });
+    } finally {
+      _requestInFlight = false;
     }
+  }
+
+  @override
+  void dispose() {
+    _autoRefresh.dispose();
+    super.dispose();
   }
 
   Future<void> updateLeaveStatus(int leaveId, String status) async {
@@ -114,6 +130,7 @@ class _HRLeavesScreenState extends State<HRLeavesScreen> {
 
       if (ApiService.isSuccess(response['status'])) {
         if (!mounted) return;
+        _mutationRevision++;
 
         final updated = response['data'] is Map
             ? response['data']['leave']

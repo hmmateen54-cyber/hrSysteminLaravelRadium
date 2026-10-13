@@ -4,6 +4,7 @@ import '../../components/logout_action.dart';
 import '../../components/app_error.dart';
 import '../../components/app_loader.dart';
 import '../../services/api_service.dart';
+import '../../services/auto_refresh_controller.dart';
 import 'hr_add_performance_screen.dart';
 import 'hr_edit_performance_screen.dart';
 
@@ -15,6 +16,9 @@ class HRPerformanceScreen extends StatefulWidget {
 }
 
 class _HRPerformanceScreenState extends State<HRPerformanceScreen> {
+  late final AutoRefreshController _autoRefresh;
+  bool _requestInFlight = false;
+  bool _hasLoaded = false;
   bool loading = true;
   String? error;
 
@@ -23,14 +27,17 @@ class _HRPerformanceScreenState extends State<HRPerformanceScreen> {
   @override
   void initState() {
     super.initState();
+    _autoRefresh = AutoRefreshController(
+      owner: this,
+      onRefresh: loadPerformance,
+    )..start();
     loadPerformance();
   }
 
   Future<void> loadPerformance() async {
-    setState(() {
-      loading = true;
-      error = null;
-    });
+    if (!mounted || _requestInFlight) return;
+    _requestInFlight = true;
+    if (!_hasLoaded && !loading) setState(() => loading = true);
 
     try {
       final response = await ApiService.get('/hr/performance');
@@ -41,21 +48,35 @@ class _HRPerformanceScreenState extends State<HRPerformanceScreen> {
         setState(() {
           performance = response['data']['performance'] ?? [];
           loading = false;
+          error = null;
+          _hasLoaded = true;
         });
       } else {
         setState(() {
-          error = response['data']['message'] ?? 'Failed to load performance';
+          if (!_hasLoaded) {
+            error = response['data']['message'] ?? 'Failed to load performance';
+          }
           loading = false;
+          _hasLoaded = true;
         });
       }
     } catch (e) {
       if (!mounted) return;
 
       setState(() {
-        error = 'Something went wrong';
+        if (!_hasLoaded) error = 'Something went wrong';
         loading = false;
+        _hasLoaded = true;
       });
+    } finally {
+      _requestInFlight = false;
     }
+  }
+
+  @override
+  void dispose() {
+    _autoRefresh.dispose();
+    super.dispose();
   }
 
   Future<void> deletePerformance(Map<String, dynamic> record) async {

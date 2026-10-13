@@ -6,6 +6,7 @@ import 'package:geolocator/geolocator.dart';
 import '../../components/app_loader.dart';
 import '../../components/logout_action.dart';
 import '../../services/api_service.dart';
+import '../../services/auto_refresh_controller.dart';
 import '../../services/offline_sync_service.dart';
 
 enum _LocationState { neutral, loading, available, waiting, uploaded, error }
@@ -19,6 +20,10 @@ class AttendanceScreen extends StatefulWidget {
 
 class _AttendanceScreenState extends State<AttendanceScreen>
     with WidgetsBindingObserver {
+  late final AutoRefreshController _autoRefresh;
+  bool _requestInFlight = false;
+  bool _refreshQueued = false;
+  bool _hasLoaded = false;
   List<Map<String, dynamic>> attendance = [];
   bool loading = true;
   bool checkingIn = false;
@@ -46,8 +51,13 @@ class _AttendanceScreenState extends State<AttendanceScreen>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _autoRefresh = AutoRefreshController(owner: this, onRefresh: getAttendance)
+      ..start();
+    OfflineSyncService.queueRevision.addListener(_onQueueChanged);
     getAttendance();
   }
+
+  void _onQueueChanged() => unawaited(getAttendance());
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
@@ -93,22 +103,23 @@ class _AttendanceScreenState extends State<AttendanceScreen>
 
   Future<void> getAttendance() async {
     if (!mounted) return;
-
-    setState(() {
-      loading = true;
-      error = null;
-    });
+    if (_requestInFlight) {
+      _refreshQueued = true;
+      return;
+    }
+    _requestInFlight = true;
+    if (!_hasLoaded && !loading) setState(() => loading = true);
 
     List<Map<String, dynamic>> local = [];
+    String? localStorageError;
 
     try {
-      local = await OfflineSyncService.getQueueItems(
-        operation: 'attendance',
-      );
+      local = await OfflineSyncService.getQueueItems(operation: 'attendance');
     } catch (_) {
-      if (mounted) {
+      localStorageError = 'Offline attendance storage is unavailable.';
+      if (mounted && !_hasLoaded) {
         setState(() {
-          error = 'Offline attendance storage is unavailable.';
+          error = localStorageError;
         });
       }
     }
@@ -118,8 +129,7 @@ class _AttendanceScreenState extends State<AttendanceScreen>
 
       if (!mounted) return;
 
-      if (ApiService.isSuccess(response['status']) &&
-          response['data'] is Map) {
+      if (ApiService.isSuccess(response['status']) && response['data'] is Map) {
         final records = response['data']['attendance'];
 
         final remote = records is List
@@ -129,47 +139,71 @@ class _AttendanceScreenState extends State<AttendanceScreen>
                   .toList()
             : <Map<String, dynamic>>[];
 
-        final localOnly = local.where((item) {
-          return !remote.any((row) {
-            final sameDate =
-                row['attendance_date']?.toString().substring(0, 10) ==
-                item['attendance_date']?.toString().substring(0, 10);
-
-            final localCheckIn = item['check_in']?.toString() ?? '';
-            final remoteCheckIn = row['check_in']?.toString() ?? '';
-            final sameCheckIn = localCheckIn.isNotEmpty &&
-                remoteCheckIn.startsWith(localCheckIn);
-
-            return sameDate && sameCheckIn;
-          });
-        }).toList();
+        final merged = _mergeAttendance(local, remote);
 
         setState(() {
-          attendance = [...localOnly, ...remote];
+          attendance = merged;
           loading = false;
+          error = localStorageError;
+          _hasLoaded = true;
         });
       } else {
         final data = response['data'];
 
         setState(() {
-          attendance = local;
-          error = data is Map
-              ? data['message']?.toString() ??
-                    ApiService.messageForStatus(response['status'])
-              : ApiService.messageForStatus(response['status']);
+          final currentRemote = attendance
+              .where((row) => !row.containsKey('sync_status'))
+              .toList();
+          attendance = _mergeAttendance(local, currentRemote);
+          error =
+              localStorageError ??
+              (data is Map
+                  ? data['message']?.toString() ??
+                        ApiService.messageForStatus(response['status'])
+                  : ApiService.messageForStatus(response['status']));
           loading = false;
+          _hasLoaded = true;
         });
       }
     } catch (_) {
       if (!mounted) return;
 
       setState(() {
-        attendance = local;
+        final currentRemote = attendance
+            .where((row) => !row.containsKey('sync_status'))
+            .toList();
+        attendance = _mergeAttendance(local, currentRemote);
         error =
+            localStorageError ??
             'Unable to reach the server. Saved attendance remains on this device.';
         loading = false;
+        _hasLoaded = true;
       });
+    } finally {
+      _requestInFlight = false;
+      if (_refreshQueued && mounted) {
+        _refreshQueued = false;
+        unawaited(Future<void>.delayed(Duration.zero, getAttendance));
+      }
     }
+  }
+
+  List<Map<String, dynamic>> _mergeAttendance(
+    List<Map<String, dynamic>> local,
+    List<Map<String, dynamic>> remote,
+  ) {
+    final localOnly = local.where((item) {
+      final clientId = item['client_id']?.toString();
+      return clientId == null ||
+          !remote.any((row) => row['sync_id']?.toString() == clientId);
+    });
+    final merged = <Map<String, dynamic>>[...localOnly, ...remote];
+    merged.sort(
+      (a, b) => (b['attendance_date']?.toString() ?? '').compareTo(
+        a['attendance_date']?.toString() ?? '',
+      ),
+    );
+    return merged;
   }
 
   Future<void> handleCheckIn() async {
@@ -187,9 +221,7 @@ class _AttendanceScreenState extends State<AttendanceScreen>
 
     if (alreadyCheckedIn) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('You have already checked in today.'),
-        ),
+        const SnackBar(content: Text('You have already checked in today.')),
       );
       return;
     }
@@ -232,15 +264,14 @@ class _AttendanceScreenState extends State<AttendanceScreen>
     } catch (e) {
       if (!mounted) return;
 
-      final message = e.toString().contains(
-        'Attendance already exists for this date',
-      )
+      final message =
+          e.toString().contains('Attendance already exists for this date')
           ? 'You have already checked in today.'
           : 'Could not save check-in on this device.';
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(message)),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(message)));
     } finally {
       if (mounted) {
         setState(() => checkingIn = false);
@@ -390,6 +421,8 @@ class _AttendanceScreenState extends State<AttendanceScreen>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _autoRefresh.dispose();
+    OfflineSyncService.queueRevision.removeListener(_onQueueChanged);
     super.dispose();
   }
 
@@ -475,8 +508,8 @@ class _AttendanceScreenState extends State<AttendanceScreen>
                               final record = attendance[index];
                               final local = record.containsKey('sync_status');
 
-                              final syncStatus =
-                                  record['sync_status']?.toString();
+                              final syncStatus = record['sync_status']
+                                  ?.toString();
 
                               final status = local
                                   ? syncStatus == 'synced'

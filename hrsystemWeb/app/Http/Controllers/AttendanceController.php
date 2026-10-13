@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use Illuminate\Http\Request;
 use App\Models\Attendance;
 use App\Models\Employee;
+use Illuminate\Support\Facades\DB;
 
 class AttendanceController extends Controller
 {
@@ -44,17 +45,27 @@ class AttendanceController extends Controller
         'remarks' => 'nullable|string',
         ]);
 
-        $alreadyExists = Attendance::where('employee_id', $validated['employee_id'])
-            ->where('attendance_date', $validated['attendance_date'])
-            ->exists();
+        $created = DB::transaction(function () use ($validated) {
+            Employee::query()
+                ->whereKey($validated['employee_id'])
+                ->lockForUpdate()
+                ->firstOrFail();
 
-        if ($alreadyExists) {
+            $alreadyExists = Attendance::where('employee_id', $validated['employee_id'])
+                ->where('attendance_date', $validated['attendance_date'])
+                ->exists();
+
+            if ($alreadyExists) return false;
+
+            Attendance::create($validated);
+            return true;
+        });
+
+        if (!$created) {
             return back()
                 ->withErrors(['attendance_date' => 'Attendance already exists for this employee on this date.'])
                 ->withInput();
         }
-
-        Attendance::create($validated);
 
         return redirect()->route('attendances.index')->with('success', 'Attendance marked successfully.');
     }
@@ -93,16 +104,24 @@ class AttendanceController extends Controller
         'remarks' => 'nullable|string',
         ]);
 
-        $duplicate = Attendance::where('employee_id', $validated['employee_id'])
-            ->where('attendance_date', $validated['attendance_date'])
-            ->where('id', '<>', $attendance->getKey())
-            ->exists();
+        $duplicate = DB::transaction(function () use ($validated, $attendance) {
+            Employee::query()
+                ->whereKey($validated['employee_id'])
+                ->lockForUpdate()
+                ->firstOrFail();
+
+            $duplicate = Attendance::where('employee_id', $validated['employee_id'])
+                ->where('attendance_date', $validated['attendance_date'])
+                ->where('id', '<>', $attendance->getKey())
+                ->exists();
+
+            if (!$duplicate) $attendance->update($validated);
+            return $duplicate;
+        });
 
         if ($duplicate) {
             return back()->withErrors(['attendance_date' => 'Attendance already exists for this employee on this date.'])->withInput();
         }
-
-        $attendance->update($validated);
 
         return redirect()->route('attendances.index')->with('success', 'Attendance updated successfully.');
     }

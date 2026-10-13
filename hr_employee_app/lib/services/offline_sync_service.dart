@@ -9,35 +9,41 @@ import 'package:uuid/uuid.dart';
 import 'api_service.dart';
 
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
-import 'package:flutter/foundation.dart' show kIsWeb, defaultTargetPlatform, TargetPlatform;
 
 class OfflineSyncService {
+  static final ValueNotifier<int> queueRevision = ValueNotifier<int>(0);
   static bool _databaseFactoryInitialized = false;
 
-static void _initializeDatabaseFactory() {
-  if (_databaseFactoryInitialized) return;
+  static void _initializeDatabaseFactory() {
+    if (_databaseFactoryInitialized) return;
 
-  if (!kIsWeb && defaultTargetPlatform == TargetPlatform.windows) {
-    sqfliteFfiInit();
-    databaseFactory = databaseFactoryFfi;
+    if (!kIsWeb && defaultTargetPlatform == TargetPlatform.windows) {
+      sqfliteFfiInit();
+      databaseFactory = databaseFactoryFfi;
+    }
+
+    _databaseFactoryInitialized = true;
   }
 
-  _databaseFactoryInitialized = true;
-}
   static Database? _db;
   static bool _syncing = false;
+  static Timer? _retryTimer;
   static StreamSubscription<List<ConnectivityResult>>?
   _connectivitySubscription;
   static const _uuid = Uuid();
 
- static Future<Database> get database async {
-  _initializeDatabaseFactory();
+  static void _queueChanged() {
+    queueRevision.value++;
+  }
 
-  if (_db != null) return _db!;
+  static Future<Database> get database async {
+    _initializeDatabaseFactory();
 
-  _db = await _initDB();
-  return _db!;
-}
+    if (_db != null) return _db!;
+
+    _db = await _initDB();
+    return _db!;
+  }
 
   static Future<Database> _initDB() async {
     final dbPath = await getDatabasesPath();
@@ -180,6 +186,9 @@ static void _initializeDatabaseFactory() {
       );
     }
     if (leaveType.trim().isEmpty) throw ArgumentError('Choose a leave type.');
+    if (reason.length > 5000) {
+      throw ArgumentError('The reason must be 5000 characters or fewer.');
+    }
 
     final owner = await _currentOwnerId();
     final db = await database;
@@ -228,6 +237,7 @@ static void _initializeDatabaseFactory() {
         'status': 'waiting',
       });
     }
+    _queueChanged();
     return id;
   }
 
@@ -268,56 +278,74 @@ static void _initializeDatabaseFactory() {
       'created_at': DateTime.now().toUtc().toIso8601String(),
       'status': 'waiting',
     });
+    _queueChanged();
     return id;
   }
 
-static Future<String> queueAttendance({
-  required String attendanceDate,
-  required String checkIn,
-  double? latitude,
-  double? longitude,
-}) async {
-  final owner = await _currentOwnerId();
-  final db = await database;
-
-  // Prevent a second local attendance for the same date.
-  final existingItems = await db.query(
-    'sync_queue',
-    where: 'owner_id = ? AND operation = ?',
-    whereArgs: [owner, 'attendance'],
-  );
-
-  for (final item in existingItems) {
-    final payload = jsonDecode(item['payload'] as String);
-
-    if (payload is Map &&
-        payload['attendance_date']?.toString() == attendanceDate) {
-      throw Exception('Attendance already exists for this date.');
+  static Future<String> queueAttendance({
+    required String attendanceDate,
+    required String checkIn,
+    double? latitude,
+    double? longitude,
+  }) async {
+    final parsedDate = DateTime.tryParse(attendanceDate);
+    if (!RegExp(r'^\d{4}-\d{2}-\d{2}$').hasMatch(attendanceDate) ||
+        parsedDate == null ||
+        parsedDate.toIso8601String().substring(0, 10) != attendanceDate) {
+      throw ArgumentError('Enter a valid attendance date.');
     }
+    if (!RegExp(r'^(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d$').hasMatch(checkIn)) {
+      throw ArgumentError('Enter a valid check-in time.');
+    }
+    if ((latitude != null && (latitude < -90 || latitude > 90)) ||
+        (longitude != null && (longitude < -180 || longitude > 180))) {
+      throw ArgumentError('The location coordinates are invalid.');
+    }
+
+    final owner = await _currentOwnerId();
+    final db = await database;
+    late String id;
+
+    await db.transaction((txn) async {
+      // Serialize local check-and-insert so two taps cannot queue two records
+      // for the same employee and date.
+      final existingItems = await txn.query(
+        'sync_queue',
+        where: 'owner_id = ? AND operation = ?',
+        whereArgs: [owner, 'attendance'],
+      );
+
+      for (final item in existingItems) {
+        final payload = jsonDecode(item['payload'] as String);
+        if (payload is Map &&
+            payload['attendance_date']?.toString() == attendanceDate) {
+          throw Exception('Attendance already exists for this date.');
+        }
+      }
+
+      final clientId = _uuid.v4();
+      id = 'attendance-$owner-$clientId';
+      final payload = {
+        'attendance_date': attendanceDate,
+        'check_in': checkIn,
+        'latitude': latitude,
+        'longitude': longitude,
+      };
+
+      await txn.insert('sync_queue', {
+        'queue_id': id,
+        'owner_id': owner,
+        'operation': 'attendance',
+        'client_id': clientId,
+        'payload': jsonEncode(payload),
+        'created_at': DateTime.now().toUtc().toIso8601String(),
+        'status': 'waiting',
+      });
+    });
+
+    _queueChanged();
+    return id;
   }
-
-  final clientId = _uuid.v4();
-  final id = 'attendance-$owner-$clientId';
-
-  final payload = {
-    'attendance_date': attendanceDate,
-    'check_in': checkIn,
-    'latitude': latitude,
-    'longitude': longitude,
-  };
-
-  await db.insert('sync_queue', {
-    'queue_id': id,
-    'owner_id': owner,
-    'operation': 'attendance',
-    'client_id': clientId,
-    'payload': jsonEncode(payload),
-    'created_at': DateTime.now().toUtc().toIso8601String(),
-    'status': 'waiting',
-  });
-
-  return id;
-}
 
   static Future<List<Map<String, dynamic>>> getQueueItems({
     String? operation,
@@ -379,6 +407,7 @@ static Future<String> queueAttendance({
       where: 'queue_id = ? AND owner_id = ?',
       whereArgs: [queueId, owner.toString()],
     );
+    _queueChanged();
     await syncPendingLeaves(force: true);
   }
 
@@ -414,9 +443,9 @@ static Future<String> queueAttendance({
 
       debugPrint('Offline sync error: $error');
       debugPrintStack(label: 'Offline sync stack trace');
-
     } finally {
       _syncing = false;
+      await _scheduleRetry();
     }
   }
 
@@ -452,6 +481,7 @@ static Future<String> queueAttendance({
       where: 'queue_id = ? AND owner_id = ?',
       whereArgs: [queueId, owner],
     );
+    _queueChanged();
 
     try {
       final endpoint = switch (operation) {
@@ -487,6 +517,7 @@ static Future<String> queueAttendance({
           where: 'queue_id = ? AND owner_id = ?',
           whereArgs: [queueId, owner],
         );
+        _queueChanged();
         return;
       }
 
@@ -507,6 +538,7 @@ static Future<String> queueAttendance({
           where: 'queue_id = ? AND owner_id = ?',
           whereArgs: [queueId, owner],
         );
+        _queueChanged();
         return;
       }
 
@@ -567,6 +599,43 @@ static Future<String> queueAttendance({
       where: 'queue_id = ? AND owner_id = ?',
       whereArgs: [row['queue_id'], row['owner_id']],
     );
+    _queueChanged();
+  }
+
+  static Future<void> _scheduleRetry() async {
+    _retryTimer?.cancel();
+    _retryTimer = null;
+
+    try {
+      final owner = await ApiService.getCurrentUserId();
+      if (owner == null) return;
+      final db = await database;
+      final rows = await db.query(
+        'sync_queue',
+        columns: ['next_attempt_at'],
+        where:
+            "owner_id = ? AND status = 'retry' AND next_attempt_at IS NOT NULL",
+        whereArgs: [owner.toString()],
+      );
+      DateTime? nextAttempt;
+      for (final row in rows) {
+        final parsed = DateTime.tryParse(
+          row['next_attempt_at'] as String? ?? '',
+        );
+        if (parsed != null &&
+            (nextAttempt == null || parsed.isBefore(nextAttempt))) {
+          nextAttempt = parsed;
+        }
+      }
+      if (nextAttempt == null) return;
+
+      final delay = nextAttempt.difference(DateTime.now().toUtc());
+      _retryTimer = Timer(delay.isNegative ? Duration.zero : delay, () {
+        unawaited(syncPendingLeaves());
+      });
+    } catch (_) {
+      // Connectivity, app resume, or the next app start will retry queue setup.
+    }
   }
 
   static void startConnectivityListener() {
@@ -577,5 +646,6 @@ static Future<String> queueAttendance({
         syncPendingLeaves();
       }
     });
+    unawaited(syncPendingLeaves());
   }
 }

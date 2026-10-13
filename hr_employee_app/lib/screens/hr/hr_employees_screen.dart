@@ -4,6 +4,7 @@ import '../../components/logout_action.dart';
 import '../../components/app_error.dart';
 import '../../components/app_loader.dart';
 import '../../services/api_service.dart';
+import '../../services/auto_refresh_controller.dart';
 
 class HREmployeesScreen extends StatefulWidget {
   const HREmployeesScreen({super.key});
@@ -13,6 +14,9 @@ class HREmployeesScreen extends StatefulWidget {
 }
 
 class _HREmployeesScreenState extends State<HREmployeesScreen> {
+  late final AutoRefreshController _autoRefresh;
+  bool _requestInFlight = false;
+  bool _hasLoaded = false;
   bool loading = true;
   String? error;
 
@@ -21,35 +25,53 @@ class _HREmployeesScreenState extends State<HREmployeesScreen> {
   @override
   void initState() {
     super.initState();
+    _autoRefresh = AutoRefreshController(owner: this, onRefresh: loadEmployees)
+      ..start();
     loadEmployees();
   }
 
   Future<void> loadEmployees() async {
-    setState(() {
-      loading = true;
-      error = null;
-    });
+    if (!mounted || _requestInFlight) return;
+    _requestInFlight = true;
+    if (!_hasLoaded && !loading) setState(() => loading = true);
 
     try {
       final response = await ApiService.get('/hr/employees');
+      if (!mounted) return;
 
       if (response['status'] == 200) {
         setState(() {
           employees = response['data']['employees'] ?? [];
           loading = false;
+          error = null;
+          _hasLoaded = true;
         });
       } else {
         setState(() {
-          error = response['data']['message'] ?? 'Failed to load employees';
+          if (!_hasLoaded) {
+            error = response['data']['message'] ?? 'Failed to load employees';
+          }
           loading = false;
+          _hasLoaded = true;
         });
       }
     } catch (e) {
-      setState(() {
-        error = 'Something went wrong';
-        loading = false;
-      });
+      if (mounted) {
+        setState(() {
+          if (!_hasLoaded) error = 'Something went wrong';
+          loading = false;
+          _hasLoaded = true;
+        });
+      }
+    } finally {
+      _requestInFlight = false;
     }
+  }
+
+  @override
+  void dispose() {
+    _autoRefresh.dispose();
+    super.dispose();
   }
 
   @override

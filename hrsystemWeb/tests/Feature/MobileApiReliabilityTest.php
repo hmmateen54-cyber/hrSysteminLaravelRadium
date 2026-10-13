@@ -88,6 +88,35 @@ class MobileApiReliabilityTest extends TestCase
             ->assertUnprocessable();
     }
 
+    public function test_attendance_sync_is_idempotent_and_enforces_one_record_per_day(): void
+    {
+        [$user, $employee] = $this->employeeAccount('attendance-owner@example.test', '124');
+        $token = $user->createToken('mobile-test')->plainTextToken;
+        $payload = [
+            'attendance_date' => '2026-10-13',
+            'check_in' => '08:30:00',
+            'sync_id' => '17dcdd87-f5d0-4c75-a7c5-522f615a6877',
+        ];
+
+        $this->withToken($token)
+            ->postJson('/api/employee/attendance', $payload)
+            ->assertCreated()
+            ->assertJsonPath('attendance.employee_id', $employee->getKey());
+
+        $this->withToken($token)
+            ->postJson('/api/employee/attendance', $payload)
+            ->assertOk();
+
+        $this->withToken($token)
+            ->postJson('/api/employee/attendance', [
+                ...$payload,
+                'sync_id' => '610ae1e0-a3e3-481c-b852-5d723814e28e',
+            ])
+            ->assertStatus(409);
+
+        $this->assertSame(1, \App\Models\Attendance::where('employee_id', $employee->getKey())->count());
+    }
+
     public function test_hr_and_admin_dashboard_counts_refresh_after_leave_review(): void
     {
         [$employeeUser, $employee] = $this->employeeAccount('leave-owner@example.test', '121');
@@ -169,6 +198,53 @@ class MobileApiReliabilityTest extends TestCase
                 'latitude' => 91,
             ])
             ->assertUnprocessable();
+    }
+
+    public function test_web_dashboard_snapshot_refreshes_counts_and_scopes_employee_leaves(): void
+    {
+        [$owner, $ownerEmployee] = $this->employeeAccount('snapshot-owner@example.test', '121');
+        [, $otherEmployee] = $this->employeeAccount('snapshot-other@example.test', '122');
+        $ownerEmployee->leaves()->create([
+            'start_date' => '2026-11-10',
+            'end_date' => '2026-11-11',
+            'leave_type' => 'Annual',
+            'status' => 'approved',
+        ]);
+        $otherEmployee->leaves()->create([
+            'start_date' => '2026-11-12',
+            'end_date' => '2026-11-12',
+            'leave_type' => 'Sick',
+            'status' => 'pending',
+        ]);
+        $ownerEmployee->salaries()->create([
+            'basic_salary' => 1500,
+            'allowances' => 100,
+            'deductions' => 0,
+            'net_salary' => 1600,
+            'salary_month' => '2026-10-01',
+            'payment_status' => 'paid',
+        ]);
+
+        $this->actingAs($owner)
+            ->getJson(route('dashboard.snapshot'))
+            ->assertOk()
+            ->assertJsonPath('metrics.pendingLeaves', 0)
+            ->assertJsonPath('metrics.approvedLeaves', 1)
+            ->assertJsonPath('salary.net_salary', '1,600.00')
+            ->assertJsonPath('recent_leaves.0.status', 'approved')
+            ->assertJsonMissing(['leave_type' => 'Sick']);
+    }
+
+    public function test_dashboard_page_renders_live_refresh_targets(): void
+    {
+        [$employeeUser] = $this->employeeAccount('dashboard-view@example.test', '123');
+
+        $this->actingAs($employeeUser)
+            ->get(route('employee.dashboard'))
+            ->assertOk()
+            ->assertSee('/dashboard/snapshot')
+            ->assertSee('dashboard-recent-content')
+            ->assertSee('data-dashboard-metric="pendingLeaves"', false);
     }
 
     /** @return array{User, Employee} */

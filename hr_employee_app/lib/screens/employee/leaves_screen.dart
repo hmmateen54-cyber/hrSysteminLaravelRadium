@@ -1,9 +1,12 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../../components/app_error.dart';
 import '../../components/app_loader.dart';
 import '../../components/logout_action.dart';
 import '../../services/api_service.dart';
+import '../../services/auto_refresh_controller.dart';
 import '../../services/offline_sync_service.dart';
 import 'apply_leave_screen.dart';
 
@@ -15,6 +18,10 @@ class LeavesScreen extends StatefulWidget {
 }
 
 class _LeavesScreenState extends State<LeavesScreen> {
+  late final AutoRefreshController _autoRefresh;
+  bool _requestInFlight = false;
+  bool _refreshQueued = false;
+  bool _hasLoaded = false;
   List<Map<String, dynamic>> leaves = [];
   bool loading = true;
   String? error;
@@ -23,22 +30,31 @@ class _LeavesScreenState extends State<LeavesScreen> {
   @override
   void initState() {
     super.initState();
+    _autoRefresh = AutoRefreshController(owner: this, onRefresh: getLeaves)
+      ..start();
+    OfflineSyncService.queueRevision.addListener(_onQueueChanged);
     getLeaves();
   }
 
+  void _onQueueChanged() => unawaited(getLeaves());
+
   Future<void> getLeaves() async {
     if (!mounted) return;
-    setState(() {
-      loading = true;
-      error = null;
-    });
+    if (_requestInFlight) {
+      _refreshQueued = true;
+      return;
+    }
+    _requestInFlight = true;
+    if (!_hasLoaded && !loading) setState(() => loading = true);
 
     List<Map<String, dynamic>> local = [];
+    String? localStorageError;
     try {
       local = await OfflineSyncService.getQueueItems(operation: 'leave');
     } catch (_) {
-      if (mounted) {
-        setState(() => error = 'Offline request storage is unavailable.');
+      localStorageError = 'Offline request storage is unavailable.';
+      if (mounted && !_hasLoaded) {
+        setState(() => error = localStorageError);
       }
     }
 
@@ -63,6 +79,8 @@ class _LeavesScreenState extends State<LeavesScreen> {
         setState(() {
           leaves = [...localOnly, ...remote];
           loading = false;
+          error = localStorageError;
+          _hasLoaded = true;
         });
       } else {
         final data = response['data'];
@@ -71,19 +89,48 @@ class _LeavesScreenState extends State<LeavesScreen> {
                   ApiService.messageForStatus(response['status'])
             : ApiService.messageForStatus(response['status']);
         setState(() {
-          leaves = local;
-          error = message;
+          final currentRemote = leaves
+              .where((leave) => !leave.containsKey('sync_status'))
+              .toList();
+          final remoteIds = currentRemote
+              .map((leave) => leave['sync_id']?.toString())
+              .whereType<String>()
+              .toSet();
+          leaves = [
+            ...local.where((item) => !remoteIds.contains(item['client_id'])),
+            ...currentRemote,
+          ];
+          error = localStorageError ?? message;
           loading = false;
+          _hasLoaded = true;
         });
       }
     } catch (_) {
       if (!mounted) return;
       setState(() {
-        leaves = local;
+        final currentRemote = leaves
+            .where((leave) => !leave.containsKey('sync_status'))
+            .toList();
+        final remoteIds = currentRemote
+            .map((leave) => leave['sync_id']?.toString())
+            .whereType<String>()
+            .toSet();
+        leaves = [
+          ...local.where((item) => !remoteIds.contains(item['client_id'])),
+          ...currentRemote,
+        ];
         error =
+            localStorageError ??
             'Unable to reach the server. Saved offline requests remain on this device.';
         loading = false;
+        _hasLoaded = true;
       });
+    } finally {
+      _requestInFlight = false;
+      if (_refreshQueued && mounted) {
+        _refreshQueued = false;
+        unawaited(Future<void>.delayed(Duration.zero, getLeaves));
+      }
     }
   }
 
@@ -118,6 +165,13 @@ class _LeavesScreenState extends State<LeavesScreen> {
       'synced' => 'Server confirmed',
       _ => 'Waiting to sync',
     };
+  }
+
+  @override
+  void dispose() {
+    _autoRefresh.dispose();
+    OfflineSyncService.queueRevision.removeListener(_onQueueChanged);
+    super.dispose();
   }
 
   @override
