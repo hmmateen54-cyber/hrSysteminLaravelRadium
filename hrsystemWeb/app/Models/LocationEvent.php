@@ -15,6 +15,9 @@ class LocationEvent extends Model
         'event_type',
         'latitude',
         'longitude',
+        'address',
+        'address_status',
+        'address_resolved_at',
         'recorded_at',
         'action_at',
         'synced_at',
@@ -25,6 +28,7 @@ class LocationEvent extends Model
     protected $casts = [
         'latitude' => 'decimal:7',
         'longitude' => 'decimal:7',
+        'address_resolved_at' => 'datetime',
         'recorded_at' => 'datetime',
         'action_at' => 'datetime',
         'synced_at' => 'datetime',

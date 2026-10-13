@@ -5,8 +5,9 @@ namespace App\Http\Controllers;
 use App\Models\Employee;
 use App\Models\User;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Hash;
+use Illuminate\Validation\ValidationException;
 
 class EmployeeController extends Controller
 {
@@ -16,6 +17,7 @@ class EmployeeController extends Controller
     public function index()
     {
         $employees = Employee::with('user')->latest()->paginate(15);
+
         return view('employees.index', compact('employees'));
     }
 
@@ -79,7 +81,7 @@ class EmployeeController extends Controller
     {
         $employee->load('user');
 
-        return view('employees.show' , compact('employee'));
+        return view('employees.show', compact('employee'));
     }
 
     /**
@@ -109,7 +111,7 @@ class EmployeeController extends Controller
         ]);
 
         $user = $employee->user;
-        abort_if(!$user, 404);
+        abort_if(! $user, 404);
 
         $activated = DB::transaction(function () use ($employee, $user, $validated) {
             $user->update(collect($validated)->only(['name', 'email'])->all());
@@ -138,19 +140,49 @@ class EmployeeController extends Controller
             );
     }
 
-    /**
-     * Remove the specified resource from storage.
-     */
+    public function updateAccountStatus(Request $request, Employee $employee)
+    {
+        $validated = $request->validate([
+            'account_status' => ['required', 'in:active,suspended'],
+        ]);
+        $employee->load('user');
+        $user = $employee->user;
+        abort_unless($user && $user->role === 'employee', 404);
 
+        if ($validated['account_status'] === 'active' && ! $employee->hasCompleteProfile()) {
+            throw ValidationException::withMessages([
+                'account_status' => 'Complete the required employee profile fields before activating this account.',
+            ]);
+        }
+
+        DB::transaction(function () use ($user, $validated) {
+            $lockedUser = User::query()->whereKey($user->getKey())->lockForUpdate()->firstOrFail();
+            $lockedUser->forceFill(['account_status' => $validated['account_status']])->save();
+            if ($validated['account_status'] === 'suspended') {
+                $lockedUser->tokens()->delete();
+            }
+        });
+
+        $message = $validated['account_status'] === 'suspended'
+            ? 'Employee account suspended. Profile and historical records have been retained.'
+            : 'Employee account activated.';
+
+        return redirect()->route('employees.index')->with('success', $message);
+    }
+
+    /** Suspend the employee account while retaining its profile and history. */
     public function destroy(Employee $employee)
     {
-        DB::transaction(function () use ($employee) {
-            $employee->user?->delete();
-            $employee->delete();
+        $user = $employee->user;
+        abort_if(! $user, 404);
+
+        DB::transaction(function () use ($user) {
+            $user->forceFill(['account_status' => 'suspended'])->save();
+            $user->tokens()->delete();
         });
 
         return redirect()
             ->route('employees.index')
-            ->with('success', 'Employee deleted successfully.');
+            ->with('success', 'Employee account suspended. Profile and historical records have been retained.');
     }
 }

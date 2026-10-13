@@ -81,7 +81,7 @@ class PerformanceController extends Controller
         return $request->validate([
             'employee_id' => ['required', 'integer', 'exists:employees,id'],
             'review_date' => ['required', 'date'],
-            'rating' => ['required', 'numeric', 'between:1,5'],
+            'rating' => ['required', 'numeric', 'between:0,10'],
             'comments' => ['nullable', 'string', 'max:5000'],
         ]);
     }

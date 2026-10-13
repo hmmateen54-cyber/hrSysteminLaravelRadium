@@ -12,6 +12,9 @@
                 <div class="field"><label for="designation">Designation</label><input id="designation" name="designation" value="{{ old('designation', $employee->designation) }}">@error('designation')<p class="field-error">{{ $message }}</p>@enderror</div>
                 <div class="field"><label for="joining_date">Joining date</label><input id="joining_date" type="date" name="joining_date" value="{{ old('joining_date', $employee->joining_date?->format('Y-m-d')) }}">@error('joining_date')<p class="field-error">{{ $message }}</p>@enderror</div>
                 <div class="field"><label for="salary">Salary</label><input id="salary" type="number" min="0" step="0.01" name="salary" value="{{ old('salary', $employee->salary) }}">@error('salary')<p class="field-error">{{ $message }}</p>@enderror</div>
+                @if($employee->user?->account_status === 'pending')
+                    <div class="field"><label>Account status</label><p class="field-hint">Pending profile completion. Completing the required profile fields activates this account.</p></div>
+                @endif
             </div>
             <div class="form-actions"><a class="btn btn-secondary" href="{{ route('employees.index') }}">Cancel</a><button class="btn btn-primary" type="submit">Save changes</button></div>
         </form>

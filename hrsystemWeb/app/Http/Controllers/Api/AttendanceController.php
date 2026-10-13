@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Attendance;
 use App\Models\Employee;
 use App\Models\LocationEvent;
+use App\Services\ReverseGeocodingService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
@@ -16,7 +17,7 @@ class AttendanceController extends Controller
 {
     public function store(Request $request): JsonResponse
     {
-        if (!$request->has('action_type')) {
+        if (! $request->has('action_type')) {
             return $this->storeLegacyCheckIn($request);
         }
 
@@ -49,11 +50,11 @@ class AttendanceController extends Controller
 
         $user = $request->user();
         $employee = $user->employee;
-        if (!$employee) {
+        if (! $employee) {
             return response()->json(['message' => 'Employee profile not found.'], 404);
         }
 
-        return DB::transaction(function () use ($validated, $user, $employee, $actionAt, $capturedAt) {
+        $response = DB::transaction(function () use ($validated, $user, $employee, $actionAt, $capturedAt) {
             $employee = Employee::query()
                 ->whereKey($employee->getKey())
                 ->lockForUpdate()
@@ -90,7 +91,7 @@ class AttendanceController extends Controller
                     ->lockForUpdate()
                     ->first();
 
-                if (!$attendance || !$attendance->check_in) {
+                if (! $attendance || ! $attendance->check_in) {
                     return response()->json([
                         'message' => 'Check in before checking out.',
                     ], 409);
@@ -104,18 +105,18 @@ class AttendanceController extends Controller
                 $checkInEvent = $attendance->locationEvents()
                     ->where('event_type', 'check_in')
                     ->first();
-                if ($checkInEvent && !$actionAt->greaterThan($checkInEvent->action_at)) {
+                if ($checkInEvent && ! $actionAt->greaterThan($checkInEvent->action_at)) {
                     return response()->json([
                         'message' => 'Check-out time must be after check-in.',
                     ], 422);
                 }
-                if (!$checkInEvent
+                if (! $checkInEvent
                     && $validated['action_date'] < $attendance->attendance_date->toDateString()) {
                     return response()->json([
                         'message' => 'Check-out date cannot be before check-in.',
                     ], 422);
                 }
-                if (!$checkInEvent
+                if (! $checkInEvent
                     && $validated['action_date'] === $attendance->attendance_date->toDateString()
                     && $validated['action_time'] <= (string) $attendance->check_in) {
                     return response()->json([
@@ -134,6 +135,7 @@ class AttendanceController extends Controller
                 'event_type' => $validated['action_type'],
                 'latitude' => $validated['latitude'],
                 'longitude' => $validated['longitude'],
+                'address_status' => 'pending',
                 'accuracy' => $validated['accuracy'],
                 'recorded_at' => $capturedAt,
                 'action_at' => $actionAt,
@@ -145,6 +147,83 @@ class AttendanceController extends Controller
 
             return $this->attendanceResponse($attendance->fresh(), $event, 201);
         });
+
+        return $this->attemptAddressResolution($response, app(ReverseGeocodingService::class));
+    }
+
+    public function resolveAddress(
+        Request $request,
+        string $clientEventId,
+        ReverseGeocodingService $geocoder,
+    ): JsonResponse {
+        $event = LocationEvent::query()
+            ->where('user_id', $request->user()->getKey())
+            ->where('client_event_id', $clientEventId)
+            ->whereNotNull('attendance_id')
+            ->firstOrFail();
+
+        if ($event->address_status === 'pending') {
+            $this->resolveEventAddress($event, $geocoder);
+        }
+
+        return response()->json([
+            'event' => [
+                'id' => $event->getKey(),
+                'client_event_id' => $event->client_event_id,
+                'address' => $event->address,
+                'address_status' => $event->address_status,
+                'address_resolved_at' => $event->address_resolved_at,
+            ],
+        ]);
+    }
+
+    private function attemptAddressResolution(
+        JsonResponse $response,
+        ReverseGeocodingService $geocoder,
+    ): JsonResponse {
+        if ($response->getStatusCode() >= 300) {
+            return $response;
+        }
+
+        $eventId = $response->getData(true)['event']['id'] ?? null;
+        if ($eventId === null) {
+            return $response;
+        }
+
+        $event = LocationEvent::query()
+            ->whereKey($eventId)
+            ->where('user_id', auth()->id())
+            ->first();
+        if (! $event || $event->address_status !== 'pending') {
+            return $event?->attendance
+                ? $this->attendanceResponse($event->attendance, $event, $response->getStatusCode())
+                : $response;
+        }
+
+        if (! $event->attendance) {
+            return $response;
+        }
+
+        $this->resolveEventAddress($event, $geocoder);
+
+        return $this->attendanceResponse(
+            $event->attendance,
+            $event,
+            $response->getStatusCode(),
+            data_get($response->getData(true), 'message', 'Attendance event saved.'),
+        );
+    }
+
+    private function resolveEventAddress(LocationEvent $event, ReverseGeocodingService $geocoder): void
+    {
+        $result = $geocoder->reverse((float) $event->latitude, (float) $event->longitude);
+        $resolved = $result['status'] !== 'pending';
+
+        $event->forceFill([
+            'address' => $result['address'],
+            'address_status' => $result['status'],
+            'address_resolved_at' => $resolved ? now() : null,
+        ])->save();
     }
 
     private function storeLegacyCheckIn(Request $request): JsonResponse
@@ -158,7 +237,7 @@ class AttendanceController extends Controller
         ]);
 
         $employee = $request->user()->employee;
-        if (!$employee) {
+        if (! $employee) {
             return response()->json(['message' => 'Employee profile not found.'], 404);
         }
 
@@ -168,7 +247,7 @@ class AttendanceController extends Controller
                 ->lockForUpdate()
                 ->firstOrFail();
 
-            if (!empty($validated['sync_id'])) {
+            if (! empty($validated['sync_id'])) {
                 $existingSync = $employee->attendances()
                     ->where('sync_id', $validated['sync_id'])
                     ->first();
@@ -178,11 +257,12 @@ class AttendanceController extends Controller
                         && $this->sameOptionalNumber($existingSync->latitude, $validated['latitude'] ?? null)
                         && $this->sameOptionalNumber($existingSync->longitude, $validated['longitude'] ?? null);
 
-                    if (!$samePayload) {
+                    if (! $samePayload) {
                         return response()->json([
                             'message' => 'This sync ID was already used for different attendance details.',
                         ], 409);
                     }
+
                     return response()->json([
                         'message' => 'Attendance was already synced.',
                         'attendance' => $existingSync,
@@ -236,7 +316,7 @@ class AttendanceController extends Controller
             && number_format((float) $event->longitude, 7, '.', '') === number_format((float) $validated['longitude'], 7, '.', '')
             && number_format((float) $event->accuracy, 2, '.', '') === number_format((float) $validated['accuracy'], 2, '.', '');
 
-        if (!$samePayload || !$attendance) {
+        if (! $samePayload || ! $attendance) {
             return response()->json([
                 'message' => 'This event ID was already used for different attendance details.',
             ], 409);
@@ -261,6 +341,9 @@ class AttendanceController extends Controller
                 'event_type' => $event->event_type,
                 'latitude' => $event->latitude,
                 'longitude' => $event->longitude,
+                'address' => $event->address,
+                'address_status' => $event->address_status,
+                'address_resolved_at' => $event->address_resolved_at,
                 'accuracy' => $event->accuracy,
                 'captured_at' => $event->recorded_at,
                 'synced_at' => $event->synced_at,

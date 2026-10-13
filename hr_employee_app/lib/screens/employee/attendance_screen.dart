@@ -2,13 +2,13 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
-
 import '../../components/app_loader.dart';
 import '../../components/logout_action.dart';
 import '../../components/offline_cache_banner.dart';
 import '../../components/app_empty_state.dart';
 import '../../components/app_section_header.dart';
 import '../../components/app_status_badge.dart';
+import '../../components/attendance_location_card.dart';
 import '../../services/api_service.dart';
 import '../../services/attendance_location_service.dart';
 import '../../services/auto_refresh_controller.dart';
@@ -40,6 +40,9 @@ class _AttendanceScreenState extends State<AttendanceScreen>
   bool _hasCachedData = false;
   bool _offlineMode = false;
   String locationMessage = 'Location has not been requested.';
+  String? _currentAddress;
+  String _addressStatus = 'none';
+  String? _accuracyLabel;
   _LocationState locationState = _LocationState.neutral;
   String? locationQueueId;
   bool _locationSyncFailed = false;
@@ -98,6 +101,13 @@ class _AttendanceScreenState extends State<AttendanceScreen>
       ].join(' · ');
 
       setState(() {
+        _currentAddress = item['address']?.toString().trim().isNotEmpty == true
+            ? item['address'].toString().trim()
+            : null;
+        _addressStatus = item['address_status']?.toString() ?? 'pending';
+        _accuracyLabel = accuracy == null
+            ? null
+            : 'GPS accuracy about ${accuracy.round()}m';
         if (status == 'synced') {
           _locationSyncFailed = false;
           locationState = _LocationState.uploaded;
@@ -163,6 +173,7 @@ class _AttendanceScreenState extends State<AttendanceScreen>
     if (cached != null && mounted) {
       setState(() {
         attendance = _mergeAttendance(local, cachedRemote);
+        _applyLatestLocation(local, cachedRemote);
         _cacheFetchedAt = cached?['fetched_at']?.toString();
         _hasCachedData = true;
         loading = false;
@@ -200,6 +211,7 @@ class _AttendanceScreenState extends State<AttendanceScreen>
 
         setState(() {
           attendance = merged;
+          _applyLatestLocation(local, remote);
           loading = false;
           error = localStorageError;
           _offlineMode = false;
@@ -289,6 +301,8 @@ class _AttendanceScreenState extends State<AttendanceScreen>
       record['last_action_type'] = action;
       record['last_action_accuracy'] = item['accuracy'];
       record['last_action_captured_at'] = item['captured_at'];
+      record['last_action_address'] = item['address'];
+      record['last_action_address_status'] = item['address_status'];
       record['last_action_synced_at'] = item['synced_at'];
       record['last_action_queue_id'] = item['queue_id'];
       record['last_action_error'] = item['last_error'];
@@ -369,7 +383,9 @@ class _AttendanceScreenState extends State<AttendanceScreen>
     setState(() {
       checkingIn = true;
       locationState = _LocationState.loading;
-      locationMessage = 'Checking permission and waiting for a fresh GPS fix…';
+      locationMessage = 'Getting current location…';
+      _currentAddress = null;
+      _addressStatus = 'none';
     });
 
     try {
@@ -379,6 +395,12 @@ class _AttendanceScreenState extends State<AttendanceScreen>
           : _dateString(actionAt);
       final location = await _locationService.capture();
       if (!mounted) return;
+      setState(() {
+        locationMessage = 'Resolving address…';
+        _addressStatus = 'pending';
+        _accuracyLabel =
+            'GPS accuracy about ${location.accuracyMeters.round()}m';
+      });
       final queueId = await OfflineSyncService.queueAttendanceAction(
         attendanceDate: targetDate,
         actionType: actionType,
@@ -390,7 +412,7 @@ class _AttendanceScreenState extends State<AttendanceScreen>
       );
       locationQueueId = queueId;
 
-      await OfflineSyncService.syncPendingLeaves(force: true);
+      await OfflineSyncService.syncPendingLeaves();
 
       final queued = (await OfflineSyncService.getQueueItems(
         operation: 'attendance',
@@ -438,7 +460,13 @@ class _AttendanceScreenState extends State<AttendanceScreen>
           }
         }
       }
-      _setLocationError(exception.message);
+      _setLocationError(
+        exception.message,
+        permissionDenied:
+            exception.issue == AttendanceLocationIssue.permissionDenied ||
+            exception.issue ==
+                AttendanceLocationIssue.permissionPermanentlyDenied,
+      );
       if (mounted) {
         ScaffoldMessenger.of(
           context,
@@ -505,14 +533,56 @@ class _AttendanceScreenState extends State<AttendanceScreen>
         false;
   }
 
-  void _setLocationError(String message) {
+  void _setLocationError(String message, {bool permissionDenied = false}) {
     if (!mounted) return;
 
     setState(() {
       _locationSyncFailed = false;
       locationState = _LocationState.error;
       locationMessage = message;
+      if (permissionDenied) _addressStatus = 'permission_denied';
     });
+  }
+
+  void _applyLatestLocation(
+    List<Map<String, dynamic>> local,
+    List<Map<String, dynamic>> remote,
+  ) {
+    final candidates = <Map<String, dynamic>>[];
+    for (final item in local) {
+      if (item['action_type'] == null) continue;
+      candidates.add({
+        ...item,
+        '_location_time': item['captured_at'] ?? item['recorded_at'],
+      });
+    }
+    for (final attendanceRecord in remote) {
+      final events = attendanceRecord['location_events'];
+      if (events is! List) continue;
+      for (final event in events.whereType<Map>()) {
+        candidates.add({
+          ...Map<String, dynamic>.from(event),
+          '_location_time': event['recorded_at'] ?? event['action_at'],
+        });
+      }
+    }
+    candidates.sort((a, b) {
+      final aTime = DateTime.tryParse(a['_location_time']?.toString() ?? '');
+      final bTime = DateTime.tryParse(b['_location_time']?.toString() ?? '');
+      if (aTime == null) return bTime == null ? 0 : 1;
+      if (bTime == null) return -1;
+      return bTime.compareTo(aTime);
+    });
+    if (candidates.isEmpty) return;
+
+    final latest = candidates.first;
+    final address = latest['address']?.toString().trim();
+    _currentAddress = address == null || address.isEmpty ? null : address;
+    _addressStatus = latest['address_status']?.toString() ?? 'none';
+    final accuracy = double.tryParse(latest['accuracy']?.toString() ?? '');
+    _accuracyLabel = accuracy == null
+        ? null
+        : 'GPS accuracy about ${accuracy.round()}m';
   }
 
   @override
@@ -560,63 +630,40 @@ class _AttendanceScreenState extends State<AttendanceScreen>
                       await getAttendance();
                     },
                   ),
-                Card(
-                  margin: const EdgeInsets.fromLTRB(20, 12, 20, 8),
-                  child: Padding(
-                    padding: const EdgeInsets.all(AppSpacing.md),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        Row(
-                          children: [
-                            Expanded(
-                              child: Text(
-                                'Attendance GPS confirmation',
-                                style: Theme.of(context).textTheme.titleSmall,
-                              ),
-                            ),
-                            AppStatusBadge(
-                              status: switch (locationState) {
-                                _LocationState.uploaded => 'synced',
-                                _LocationState.waiting => 'pending',
-                                _LocationState.loading => 'in_progress',
-                                _LocationState.error => 'failed',
-                                _ => 'neutral',
-                              },
-                              label: switch (locationState) {
-                                _LocationState.uploaded => 'Server confirmed',
-                                _LocationState.waiting => 'Waiting to sync',
-                                _LocationState.loading => 'Locating',
-                                _LocationState.error => 'Needs attention',
-                                _ => 'Not recorded',
-                              },
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: AppSpacing.xs),
-                        Text(
-                          locationMessage,
-                          style: Theme.of(context).textTheme.bodySmall,
-                        ),
-                        if (locationState == _LocationState.waiting ||
-                            _locationSyncFailed) ...[
-                          const SizedBox(height: 4),
-                          TextButton.icon(
-                            onPressed: () async {
-                              final queueId = locationQueueId;
-                              if (queueId != null) {
-                                await OfflineSyncService.retryQueueItem(
-                                  queueId,
-                                );
-                              }
-                            },
-                            icon: const Icon(Icons.sync),
-                            label: const Text('Retry attendance sync'),
-                          ),
-                        ],
-                      ],
-                    ),
-                  ),
+                AttendanceLocationCard(
+                  syncStatus: switch (locationState) {
+                    _LocationState.uploaded => 'synced',
+                    _LocationState.waiting => 'waiting',
+                    _LocationState.loading => 'loading',
+                    _LocationState.error => 'failed',
+                    _ => 'neutral',
+                  },
+                  addressStatus: _addressStatus,
+                  address: _currentAddress,
+                  message: locationMessage,
+                  accuracyLabel: _accuracyLabel,
+                  onRetrySync:
+                      locationState == _LocationState.waiting ||
+                          _locationSyncFailed
+                      ? () async {
+                          final queueId = locationQueueId;
+                          if (queueId != null) {
+                            await OfflineSyncService.retryQueueItem(queueId);
+                          }
+                        }
+                      : null,
+                  onRetryAddress:
+                      locationState == _LocationState.uploaded &&
+                          _addressStatus == 'pending'
+                      ? () async {
+                          final queueId = locationQueueId;
+                          if (queueId != null) {
+                            await OfflineSyncService.retryAddressResolution(
+                              queueId,
+                            );
+                          }
+                        }
+                      : null,
                 ),
                 Expanded(
                   child: RefreshIndicator(
@@ -685,6 +732,24 @@ class _AttendanceScreenState extends State<AttendanceScreen>
               ? 'failed'
               : 'pending'
         : status;
+    final events = record['location_events'];
+    final latestEvent = events is List && events.whereType<Map>().isNotEmpty
+        ? Map<String, dynamic>.from(events.whereType<Map>().last)
+        : <String, dynamic>{};
+    final address =
+        record['last_action_address']?.toString().trim().isNotEmpty == true
+        ? record['last_action_address'].toString().trim()
+        : latestEvent['address']?.toString().trim();
+    final addressStatus =
+        record['last_action_address_status']?.toString() ??
+        latestEvent['address_status']?.toString();
+    final addressLine = address != null && address.isNotEmpty
+        ? '\nLocation: $address\n© OpenStreetMap contributors'
+        : addressStatus == 'pending'
+        ? '\nLocation address pending'
+        : addressStatus == 'unavailable'
+        ? '\nAddress unavailable'
+        : '';
     return Card(
       margin: const EdgeInsets.only(bottom: AppSpacing.sm),
       child: ListTile(
@@ -705,7 +770,7 @@ class _AttendanceScreenState extends State<AttendanceScreen>
         ),
         subtitle: Text(
           'Check in: ${record['check_in'] ?? '—'}\n'
-          'Check out: ${record['check_out'] ?? '—'}',
+          'Check out: ${record['check_out'] ?? '—'}$addressLine',
         ),
         isThreeLine: true,
         trailing: AppStatusBadge(status: statusKey, label: status),

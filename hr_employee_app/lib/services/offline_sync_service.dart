@@ -49,7 +49,7 @@ class OfflineSyncService {
     final dbPath = await getDatabasesPath();
     return openDatabase(
       join(dbPath, 'hr_offline_sync.db'),
-      version: 5,
+      version: 6,
       onCreate: (db, _) async {
         await _createQueueTable(db);
         await _createUserCacheTable(db);
@@ -58,7 +58,20 @@ class OfflineSyncService {
         if (oldVersion < 3) await _migrateLegacyQueues(db);
         if (oldVersion < 4) await _createUserCacheTable(db);
         if (oldVersion < 5) {
-          await db.execute('ALTER TABLE sync_queue ADD COLUMN synced_at TEXT');
+          await _addQueueColumnIfMissing(db, 'synced_at', 'TEXT');
+        }
+        if (oldVersion < 6) {
+          await _addQueueColumnIfMissing(
+            db,
+            'address_status',
+            "TEXT NOT NULL DEFAULT 'none'",
+          );
+          await _addQueueColumnIfMissing(
+            db,
+            'address_retry_count',
+            'INTEGER NOT NULL DEFAULT 0',
+          );
+          await _addQueueColumnIfMissing(db, 'address_next_attempt_at', 'TEXT');
         }
       },
       onOpen: (db) async {
@@ -90,6 +103,9 @@ class OfflineSyncService {
         last_error TEXT,
         server_record_id INTEGER,
         synced_at TEXT,
+        address_status TEXT NOT NULL DEFAULT 'none',
+        address_retry_count INTEGER NOT NULL DEFAULT 0,
+        address_next_attempt_at TEXT,
         UNIQUE(owner_id, operation, client_id)
       )
     ''');
@@ -99,6 +115,16 @@ class OfflineSyncService {
     await db.execute(
       'CREATE INDEX sync_queue_owner_operation_idx ON sync_queue(owner_id, operation)',
     );
+  }
+
+  static Future<void> _addQueueColumnIfMissing(
+    DatabaseExecutor db,
+    String column,
+    String definition,
+  ) async {
+    final columns = await db.rawQuery('PRAGMA table_info(sync_queue)');
+    if (columns.any((row) => row['name'] == column)) return;
+    await db.execute('ALTER TABLE sync_queue ADD COLUMN $column $definition');
   }
 
   static Future<void> _createUserCacheTable(DatabaseExecutor db) async {
@@ -532,6 +558,7 @@ class OfflineSyncService {
         'latitude': latitude,
         'longitude': longitude,
         'accuracy': accuracy,
+        'address_status': 'pending',
       };
       await txn.insert('sync_queue', {
         'queue_id': queueId,
@@ -541,6 +568,8 @@ class OfflineSyncService {
         'payload': jsonEncode(payload),
         'created_at': DateTime.now().toUtc().toIso8601String(),
         'status': 'waiting',
+        'address_status': 'pending',
+        'address_retry_count': 0,
       });
     });
 
@@ -584,6 +613,9 @@ class OfflineSyncService {
         'last_error': row['last_error'],
         'server_record_id': row['server_record_id'],
         'synced_at': row['synced_at'],
+        'address_status': row['address_status'],
+        'address_retry_count': row['address_retry_count'],
+        'address_next_attempt_at': row['address_next_attempt_at'],
       };
     }).toList();
   }
@@ -607,6 +639,20 @@ class OfflineSyncService {
         'last_error': null,
       },
       where: 'queue_id = ? AND owner_id = ?',
+      whereArgs: [queueId, owner.toString()],
+    );
+    _queueChanged();
+    await syncPendingLeaves(force: true);
+  }
+
+  static Future<void> retryAddressResolution(String queueId) async {
+    final owner = await ApiService.getCurrentUserId();
+    if (owner == null) return;
+    final db = await database;
+    await db.update(
+      'sync_queue',
+      {'address_retry_count': 0, 'address_next_attempt_at': null},
+      where: "queue_id = ? AND owner_id = ? AND address_status = 'pending'",
       whereArgs: [queueId, owner.toString()],
     );
     _queueChanged();
@@ -639,6 +685,7 @@ class OfflineSyncService {
           await _syncItem(item);
         }
       }
+      await _syncPendingAddresses(owner.toString(), force: force);
     } catch (error) {
       // Do not log payloads, tokens, or exact coordinates.
       // debugPrint('Offline sync could not run: ${error.runtimeType}');
@@ -724,9 +771,32 @@ class OfflineSyncService {
               }]
             : null;
         final serverId = record is Map ? record['id'] : null;
+        final locationEvent =
+            operation == 'attendance' &&
+                payload.containsKey('action_type') &&
+                data is Map
+            ? data['event']
+            : null;
+        final updatedPayload = Map<String, dynamic>.from(payload);
+        final addressStatus = locationEvent is Map
+            ? _validAddressStatus(locationEvent['address_status'])
+            : 'none';
+        if (locationEvent is Map) {
+          updatedPayload['address'] = locationEvent['address'];
+          updatedPayload['address_status'] = addressStatus;
+          updatedPayload['address_resolved_at'] =
+              locationEvent['address_resolved_at'];
+        }
+        final addressRetryAt = addressStatus == 'pending'
+            ? DateTime.now()
+                  .toUtc()
+                  .add(const Duration(minutes: 1))
+                  .toIso8601String()
+            : null;
         await db.update(
           'sync_queue',
           {
+            'payload': jsonEncode(updatedPayload),
             'status': 'synced',
             'server_record_id': serverId is int
                 ? serverId
@@ -740,6 +810,12 @@ class OfflineSyncService {
                 : DateTime.now().toUtc().toIso8601String(),
             'last_error': null,
             'next_attempt_at': null,
+            if (operation == 'attendance' &&
+                payload.containsKey('action_type')) ...{
+              'address_status': addressStatus,
+              'address_retry_count': 0,
+              'address_next_attempt_at': addressRetryAt,
+            },
           },
           where: 'queue_id = ? AND owner_id = ?',
           whereArgs: [queueId, owner],
@@ -790,6 +866,124 @@ class OfflineSyncService {
         event['client_event_id']?.toString() == clientId &&
         event['synced_at'] != null &&
         data['server_confirmed_at'] != null;
+  }
+
+  static String _validAddressStatus(dynamic value) =>
+      switch (value?.toString()) {
+        'resolved' => 'resolved',
+        'unavailable' => 'unavailable',
+        'pending' => 'pending',
+        _ => 'pending',
+      };
+
+  static Future<void> _syncPendingAddresses(
+    String owner, {
+    required bool force,
+  }) async {
+    final db = await database;
+    final now = DateTime.now().toUtc().toIso8601String();
+    final rows = await db.query(
+      'sync_queue',
+      where: force
+          ? "owner_id = ? AND operation = 'attendance' AND status = 'synced' AND address_status = 'pending'"
+          : "owner_id = ? AND operation = 'attendance' AND status = 'synced' AND address_status = 'pending' AND (address_next_attempt_at IS NULL OR address_next_attempt_at <= ?)",
+      whereArgs: force ? [owner] : [owner, now],
+      orderBy: 'created_at ASC',
+    );
+
+    for (final row in rows) {
+      final currentOwner = await ApiService.getCurrentUserId();
+      if (currentOwner == null || currentOwner.toString() != owner) return;
+      final token = await ApiService.getStoredToken();
+      if (token == null || token.isEmpty) return;
+
+      final payload =
+          jsonDecode(row['payload'] as String) as Map<String, dynamic>;
+      final clientId = row['client_id'] as String;
+      try {
+        final response = await ApiService.post(
+          '/employee/attendance-actions/$clientId/resolve-address',
+          const <String, dynamic>{},
+        );
+        final data = response['data'];
+        final event = data is Map ? data['event'] : null;
+        if (ApiService.isSuccess(response['status']) &&
+            event is Map &&
+            event['client_event_id']?.toString() == clientId) {
+          final status = _validAddressStatus(event['address_status']);
+          final updatedPayload = Map<String, dynamic>.from(payload)
+            ..['address'] = event['address']
+            ..['address_status'] = status
+            ..['address_resolved_at'] = event['address_resolved_at'];
+          final retryCount = status == 'pending'
+              ? (row['address_retry_count'] as int? ?? 0) + 1
+              : 0;
+          final retryAt = status == 'pending'
+              ? _nextAddressAttempt(retryCount)
+              : null;
+          await db.update(
+            'sync_queue',
+            {
+              'payload': jsonEncode(updatedPayload),
+              'address_status': status,
+              'address_retry_count': retryCount,
+              'address_next_attempt_at': retryAt,
+            },
+            where: 'queue_id = ? AND owner_id = ?',
+            whereArgs: [row['queue_id'], owner],
+          );
+          _queueChanged();
+        } else if (response['status'] == 404) {
+          final updatedPayload = Map<String, dynamic>.from(payload)
+            ..['address'] = null
+            ..['address_status'] = 'unavailable';
+          await db.update(
+            'sync_queue',
+            {
+              'payload': jsonEncode(updatedPayload),
+              'address_status': 'unavailable',
+              'address_next_attempt_at': null,
+            },
+            where: 'queue_id = ? AND owner_id = ?',
+            whereArgs: [row['queue_id'], owner],
+          );
+          _queueChanged();
+        } else {
+          await _scheduleAddressRetry(row, owner);
+        }
+      } catch (_) {
+        await _scheduleAddressRetry(row, owner);
+      }
+    }
+  }
+
+  static Future<void> _scheduleAddressRetry(
+    Map<String, Object?> row,
+    String owner,
+  ) async {
+    final retries = (row['address_retry_count'] as int? ?? 0) + 1;
+    await database.then(
+      (db) => db.update(
+        'sync_queue',
+        {
+          'address_retry_count': retries,
+          'address_next_attempt_at': _nextAddressAttempt(retries),
+        },
+        where: 'queue_id = ? AND owner_id = ?',
+        whereArgs: [row['queue_id'], owner],
+      ),
+    );
+    _queueChanged();
+  }
+
+  static String _nextAddressAttempt(int retries) {
+    final delayMinutes = (1 << (retries.clamp(1, 8).toInt() - 1))
+        .clamp(1, 360)
+        .toInt();
+    return DateTime.now()
+        .toUtc()
+        .add(Duration(minutes: delayMinutes))
+        .toIso8601String();
   }
 
   static String _safeServerMessage(dynamic data, dynamic status) {
@@ -847,24 +1041,30 @@ class OfflineSyncService {
     _retryTimer = null;
 
     try {
+      final connectivity = await Connectivity().checkConnectivity();
+      if (connectivity.isEmpty ||
+          connectivity.every((result) => result == ConnectivityResult.none)) {
+        return;
+      }
+
       final owner = await ApiService.getCurrentUserId();
       if (owner == null) return;
       final db = await database;
       final rows = await db.query(
         'sync_queue',
-        columns: ['next_attempt_at'],
+        columns: ['next_attempt_at', 'address_next_attempt_at'],
         where:
-            "owner_id = ? AND status = 'retry' AND next_attempt_at IS NOT NULL",
+            "owner_id = ? AND ((status = 'retry' AND next_attempt_at IS NOT NULL) OR (address_status = 'pending' AND address_next_attempt_at IS NOT NULL))",
         whereArgs: [owner.toString()],
       );
       DateTime? nextAttempt;
       for (final row in rows) {
-        final parsed = DateTime.tryParse(
-          row['next_attempt_at'] as String? ?? '',
-        );
-        if (parsed != null &&
-            (nextAttempt == null || parsed.isBefore(nextAttempt))) {
-          nextAttempt = parsed;
+        for (final field in ['next_attempt_at', 'address_next_attempt_at']) {
+          final parsed = DateTime.tryParse(row[field] as String? ?? '');
+          if (parsed != null &&
+              (nextAttempt == null || parsed.isBefore(nextAttempt))) {
+            nextAttempt = parsed;
+          }
         }
       }
       if (nextAttempt == null) return;

@@ -11,8 +11,6 @@ use Illuminate\Validation\Rule;
 
 class AuthController extends Controller
 {
-    private const PENDING_PROFILE_MESSAGE = 'Your account is registered, but your employee profile is awaiting HR completion. You will be able to log in once HR completes your profile.';
-
     public function register(Request $request, EmployeeRegistrationService $registration)
     {
         $validated = $request->validate([
@@ -24,7 +22,7 @@ class AuthController extends Controller
         $user = $registration->register($validated);
 
         return response()->json([
-            'message' => self::PENDING_PROFILE_MESSAGE,
+            'message' => User::PENDING_PROFILE_MESSAGE,
             'account_status' => 'pending',
             'user' => [
                 'id' => $user->getKey(),
@@ -55,7 +53,7 @@ class AuthController extends Controller
 
         if ($user->isInactiveEmployee()) {
             return response()->json([
-                'message' => self::PENDING_PROFILE_MESSAGE,
+                'message' => $user->inactiveEmployeeMessage(),
             ], 403);
         }
 

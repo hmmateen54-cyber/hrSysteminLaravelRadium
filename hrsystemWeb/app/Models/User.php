@@ -15,6 +15,10 @@ class User extends Authenticatable
 {
     use HasApiTokens;
 
+    public const PENDING_PROFILE_MESSAGE = 'Your account is registered, but your employee profile is awaiting HR completion. You will be able to log in once HR completes your profile.';
+
+    public const SUSPENDED_ACCOUNT_MESSAGE = 'Your employee account is suspended. Please contact HR to restore access.';
+
     /** @use HasFactory<UserFactory> */
     use HasFactory;
 
@@ -48,10 +52,19 @@ class User extends Authenticatable
     public function isInactiveEmployee(): bool
     {
         // A null value on a just-created model still means the database default
-        // applies; the column is non-nullable and only pending is non-active.
+        // applies; pending and suspended employees are both blocked from access.
         return $this->role === 'employee'
             && $this->account_status !== null
             && $this->account_status !== 'active';
+    }
+
+    public function inactiveEmployeeMessage(): string
+    {
+        return match ($this->account_status) {
+            'pending' => self::PENDING_PROFILE_MESSAGE,
+            'suspended' => self::SUSPENDED_ACCOUNT_MESSAGE,
+            default => 'Your employee account is inactive. Please contact HR.',
+        };
     }
 
     /**

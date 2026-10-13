@@ -130,6 +130,31 @@ class SalaryManagementTest extends TestCase
         $this->assertDatabaseCount('salaries', 1);
     }
 
+    public function test_calculated_net_salary_must_fit_the_database_decimal_column(): void
+    {
+        $hr = User::factory()->create(['role' => 'hr']);
+        [, $employee] = $this->employee('Raza Staff', 'EMP-701');
+        $payload = [
+            'employee_id' => $employee->id,
+            'basic_salary' => '9999999999.99',
+            'allowances' => '0.00',
+            'deductions' => '0.00',
+            'salary_month' => '2026-10',
+            'payment_status' => 'pending',
+        ];
+
+        $this->actingAs($hr)->post(route('salaries.store'), $payload)
+            ->assertRedirect(route('salaries.index'));
+        $this->assertSame('9999999999.99', Salary::firstOrFail()->net_salary);
+
+        $this->post(route('salaries.store'), [
+            ...$payload,
+            'allowances' => '0.01',
+            'salary_month' => '2026-11',
+        ])->assertSessionHasErrors('allowances');
+        $this->assertDatabaseCount('salaries', 1);
+    }
+
     private function employee(string $name, string $employeeId): array
     {
         $user = User::factory()->create(['name' => $name, 'role' => 'employee']);

@@ -5,12 +5,15 @@ namespace App\Http\Controllers;
 use App\Models\Employee;
 use App\Models\Salary;
 use Carbon\Carbon;
+use Illuminate\Database\QueryException;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 
 class SalaryController extends Controller
 {
+    private const MAX_SALARY_CENTS = 999_999_999_999;
+
     public function index(Request $request)
     {
         $filters = $request->validate([
@@ -73,7 +76,15 @@ class SalaryController extends Controller
     public function store(Request $request)
     {
         $data = $this->validated($request);
-        Salary::create($data);
+        try {
+            Salary::create($data);
+        } catch (QueryException $exception) {
+            if (! $this->salaryExistsForMonth($data['employee_id'], $data['salary_month'])) {
+                throw $exception;
+            }
+
+            $this->throwDuplicateSalaryMonth();
+        }
 
         return redirect()->route('salaries.index')->with('success', 'Salary record created.');
     }
@@ -95,7 +106,16 @@ class SalaryController extends Controller
 
     public function update(Request $request, Salary $salary)
     {
-        $salary->update($this->validated($request, $salary));
+        $data = $this->validated($request, $salary);
+        try {
+            $salary->update($data);
+        } catch (QueryException $exception) {
+            if (! $this->salaryExistsForMonth($data['employee_id'], $data['salary_month'], $salary)) {
+                throw $exception;
+            }
+
+            $this->throwDuplicateSalaryMonth();
+        }
 
         return redirect()->route('salaries.show', $salary)->with('success', 'Salary record updated.');
     }
@@ -121,32 +141,56 @@ class SalaryController extends Controller
         ]);
 
         $month = Carbon::createFromFormat('!Y-m-d', $data['salary_month'].'-01')->toDateString();
-        $duplicate = Salary::query()
-            ->where('employee_id', $data['employee_id'])
-            ->whereDate('salary_month', $month)
-            ->when($salary, fn ($query) => $query->whereKeyNot($salary->getKey()))
-            ->exists();
-
-        if ($duplicate) {
-            throw ValidationException::withMessages([
-                'salary_month' => 'A salary record already exists for this employee and month.',
-            ]);
+        if ($this->salaryExistsForMonth($data['employee_id'], $month, $salary)) {
+            $this->throwDuplicateSalaryMonth();
         }
 
-        $netSalary = round(
-            (float) $data['basic_salary'] + (float) $data['allowances'] - (float) $data['deductions'],
-            2
-        );
+        $netSalaryCents = $this->amountToCents($data['basic_salary'])
+            + $this->amountToCents($data['allowances'])
+            - $this->amountToCents($data['deductions']);
 
-        if ($netSalary < 0) {
+        if ($netSalaryCents < 0) {
             throw ValidationException::withMessages([
                 'deductions' => 'Deductions cannot exceed basic salary plus allowances.',
             ]);
         }
 
+        if ($netSalaryCents > self::MAX_SALARY_CENTS) {
+            throw ValidationException::withMessages([
+                'allowances' => 'The calculated net salary cannot exceed 9,999,999,999.99.',
+            ]);
+        }
+
         $data['salary_month'] = $month;
-        $data['net_salary'] = $netSalary;
+        $data['net_salary'] = sprintf(
+            '%d.%02d',
+            intdiv($netSalaryCents, 100),
+            $netSalaryCents % 100,
+        );
 
         return $data;
+    }
+
+    private function amountToCents(string|int|float $amount): int
+    {
+        [$whole, $fraction] = explode('.', number_format((float) $amount, 2, '.', ''), 2);
+
+        return ((int) $whole * 100) + (int) $fraction;
+    }
+
+    private function salaryExistsForMonth(int|string $employeeId, string $month, ?Salary $salary = null): bool
+    {
+        return Salary::query()
+            ->where('employee_id', $employeeId)
+            ->whereDate('salary_month', $month)
+            ->when($salary, fn ($query) => $query->whereKeyNot($salary->getKey()))
+            ->exists();
+    }
+
+    private function throwDuplicateSalaryMonth(): void
+    {
+        throw ValidationException::withMessages([
+            'salary_month' => 'A salary record already exists for this employee and month.',
+        ]);
     }
 }

@@ -9,6 +9,8 @@ use App\Models\LocationEvent;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
 
 class MobileApiReliabilityTest extends TestCase
@@ -28,6 +30,18 @@ class MobileApiReliabilityTest extends TestCase
         $this->assertDatabaseMissing('personal_access_tokens', ['id' => $tokenId]);
         $this->app['auth']->forgetGuards();
         $this->withToken($plainTextToken)
+            ->getJson('/api/user')
+            ->assertUnauthorized();
+    }
+
+    public function test_mobile_tokens_expire_after_the_configured_lifetime(): void
+    {
+        $user = User::factory()->create(['role' => 'employee']);
+        $token = $user->createToken('mobile-expiry-test')->plainTextToken;
+
+        $this->travel(31)->days();
+
+        $this->withToken($token)
             ->getJson('/api/user')
             ->assertUnauthorized();
     }
@@ -141,6 +155,17 @@ class MobileApiReliabilityTest extends TestCase
 
     public function test_attendance_actions_persist_gps_for_check_in_and_check_out_and_are_idempotent(): void
     {
+        Cache::flush();
+        Http::fake(['*' => Http::response([
+            'display_name' => 'DHA Phase 6, Karachi, Sindh, Pakistan',
+            'address' => [
+                'neighbourhood' => 'DHA Phase 6',
+                'suburb' => 'DHA Phase 6',
+                'city' => 'Karachi',
+                'state' => 'Sindh',
+                'country' => 'Pakistan',
+            ],
+        ])]);
         Carbon::setTestNow(Carbon::parse('2026-10-13 18:00:00 UTC'));
         [$user, $employee] = $this->employeeAccount('gps-attendance@example.test', '125');
         [, $otherEmployee] = $this->employeeAccount('gps-other@example.test', '126');
@@ -169,6 +194,8 @@ class MobileApiReliabilityTest extends TestCase
             ->assertJsonPath('event.latitude', '24.8607123')
             ->assertJsonPath('event.longitude', '67.0011456')
             ->assertJsonPath('event.accuracy', '8.45')
+            ->assertJsonPath('event.address', 'DHA Phase 6, Karachi, Sindh, Pakistan')
+            ->assertJsonPath('event.address_status', 'resolved')
             ->assertJsonPath('event.client_event_id', $checkIn['client_event_id'])
             ->assertJsonStructure(['server_confirmed_at']);
 
@@ -177,6 +204,8 @@ class MobileApiReliabilityTest extends TestCase
         $this->assertSame('24.8607123', $checkInEvent->latitude);
         $this->assertSame('67.0011456', $checkInEvent->longitude);
         $this->assertSame('8.45', $checkInEvent->accuracy);
+        $this->assertSame('DHA Phase 6, Karachi, Sindh, Pakistan', $checkInEvent->address);
+        $this->assertSame('resolved', $checkInEvent->address_status);
         $this->assertSame('2026-10-13 03:30:04', $checkInEvent->recorded_at->format('Y-m-d H:i:s'));
         $this->assertSame($employee->getKey(), $checkInEvent->employee_id);
 
@@ -213,6 +242,7 @@ class MobileApiReliabilityTest extends TestCase
             ->getJson('/api/employee/attendance')
             ->assertOk()
             ->assertJsonPath('attendance.0.location_events.0.event_type', 'check_in')
+            ->assertJsonPath('attendance.0.location_events.0.address', 'DHA Phase 6, Karachi, Sindh, Pakistan')
             ->assertJsonMissingPath('attendance.0.location_events.0.latitude')
             ->assertJsonMissingPath('attendance.0.location_events.0.longitude');
 
@@ -223,10 +253,23 @@ class MobileApiReliabilityTest extends TestCase
         $this->withToken($token)
             ->postJson('/api/employee/attendance-actions', $secondCheckout)
             ->assertStatus(409);
+
+        Http::assertSent(function ($request): bool {
+            $query = [];
+            parse_str((string) parse_url($request->url(), PHP_URL_QUERY), $query);
+
+            return str_contains($request->url(), 'nominatim.openstreetmap.org/reverse')
+                && ($query['lat'] ?? null) == 24.8607123
+                && ($query['lon'] ?? null) == 67.0011456
+                && $request->hasHeader('User-Agent')
+                && !$request->hasHeader('Authorization');
+        });
     }
 
     public function test_attendance_action_requires_valid_fresh_location_data_and_cannot_target_another_employee(): void
     {
+        Cache::flush();
+        Http::fake(['*' => Http::response(['error' => 'temporarily unavailable'], 503)]);
         Carbon::setTestNow(Carbon::parse('2026-10-13 18:00:00 UTC'));
         [$user, $employee] = $this->employeeAccount('gps-validation@example.test', '127');
         [, $otherEmployee] = $this->employeeAccount('gps-validation-other@example.test', '128');
@@ -268,10 +311,106 @@ class MobileApiReliabilityTest extends TestCase
                 'employee_id' => $otherEmployee->getKey(),
             ])
             ->assertCreated()
-            ->assertJsonPath('attendance.employee_id', $employee->getKey());
+            ->assertJsonPath('attendance.employee_id', $employee->getKey())
+            ->assertJsonPath('event.address_status', 'pending');
 
         $this->assertSame(1, Attendance::where('employee_id', $employee->getKey())->count());
         $this->assertSame(0, Attendance::where('employee_id', $otherEmployee->getKey())->count());
+    }
+
+    public function test_address_retry_resolves_saved_event_and_is_scoped_to_its_employee(): void
+    {
+        Cache::flush();
+        Http::fake([
+            '*' => Http::sequence()
+                ->push(['error' => 'temporarily unavailable'], 503)
+                ->push([
+                    'address' => [
+                        'road' => 'Shahrah-e-Faisal',
+                        'city' => 'Karachi',
+                        'state' => 'Sindh',
+                        'country' => 'Pakistan',
+                    ],
+                ]),
+        ]);
+        Carbon::setTestNow(Carbon::parse('2026-10-13 18:00:00 UTC'));
+        [$owner, $employee] = $this->employeeAccount('address-owner@example.test', '129');
+        [$otherOwner] = $this->employeeAccount('address-other@example.test', '130');
+        $token = $owner->createToken('address-owner-test')->plainTextToken;
+        $otherToken = $otherOwner->createToken('address-other-test')->plainTextToken;
+        $clientEventId = 'c5f1f90f-6d48-440b-806f-58e98c095121';
+        $payload = [
+            'action_type' => 'check_in',
+            'client_event_id' => $clientEventId,
+            'attendance_date' => '2026-10-13',
+            'action_date' => '2026-10-13',
+            'action_time' => '09:30:00',
+            'action_at' => '2026-10-13T04:30:00Z',
+            'captured_at' => '2026-10-13T04:30:02Z',
+            'latitude' => 24.8607123,
+            'longitude' => 67.0011456,
+            'accuracy' => 10,
+        ];
+
+        $this->withToken($token)
+            ->postJson('/api/employee/attendance-actions', $payload)
+            ->assertCreated()
+            ->assertJsonPath('event.address_status', 'pending');
+
+        $event = LocationEvent::query()->where('client_event_id', $clientEventId)->firstOrFail();
+        $this->assertSame('pending', $event->address_status);
+        $this->assertSame(1, Attendance::where('employee_id', $employee->getKey())->count());
+        $this->assertSame('2026-10-13 04:30:02', $event->recorded_at->format('Y-m-d H:i:s'));
+
+        $this->app['auth']->forgetGuards();
+        $this->withToken($otherToken)
+            ->postJson("/api/employee/attendance-actions/{$clientEventId}/resolve-address")
+            ->assertNotFound();
+
+        $this->app['auth']->forgetGuards();
+        $this->withToken($token)
+            ->postJson("/api/employee/attendance-actions/{$clientEventId}/resolve-address")
+            ->assertOk()
+            ->assertJsonPath('event.address', 'Shahrah-e-Faisal, Karachi, Sindh, Pakistan')
+            ->assertJsonPath('event.address_status', 'resolved');
+
+        $this->assertSame(1, Attendance::where('employee_id', $employee->getKey())->count());
+        $this->assertSame(1, LocationEvent::where('client_event_id', $clientEventId)->count());
+        $this->assertSame('resolved', $event->fresh()->address_status);
+    }
+
+    public function test_reverse_geocoder_no_result_does_not_discard_attendance(): void
+    {
+        Cache::flush();
+        Http::fake(['*' => Http::response(['error' => 'Unable to geocode'], 404)]);
+        Carbon::setTestNow(Carbon::parse('2026-10-13 18:00:00 UTC'));
+        [$owner, $employee] = $this->employeeAccount('address-unavailable@example.test', '131');
+        $token = $owner->createToken('address-unavailable-test')->plainTextToken;
+
+        $this->withToken($token)
+            ->postJson('/api/employee/attendance-actions', [
+                'action_type' => 'check_in',
+                'client_event_id' => '962c9717-1d71-4437-a878-1c81c60b8429',
+                'attendance_date' => '2026-10-13',
+                'action_date' => '2026-10-13',
+                'action_time' => '10:15:00',
+                'action_at' => '2026-10-13T05:15:00Z',
+                'captured_at' => '2026-10-13T05:15:02Z',
+                'latitude' => 24.8607123,
+                'longitude' => 67.0011456,
+                'accuracy' => 9,
+            ])
+            ->assertCreated()
+            ->assertJsonPath('event.address', null)
+            ->assertJsonPath('event.address_status', 'unavailable');
+
+        $this->assertSame(1, Attendance::where('employee_id', $employee->getKey())->count());
+        $this->assertSame(1, LocationEvent::where('user_id', $owner->getKey())->count());
+        $this->assertDatabaseHas('location_events', [
+            'user_id' => $owner->getKey(),
+            'address' => null,
+            'address_status' => 'unavailable',
+        ]);
     }
 
     public function test_hr_and_admin_dashboard_counts_refresh_after_leave_review(): void

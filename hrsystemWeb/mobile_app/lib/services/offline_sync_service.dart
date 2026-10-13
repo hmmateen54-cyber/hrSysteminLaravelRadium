@@ -2,15 +2,19 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:connectivity_plus/connectivity_plus.dart';
-import 'package:flutter/foundation.dart';
+import 'package:flutter/foundation.dart'
+    show
+        TargetPlatform,
+        defaultTargetPlatform,
+        kIsWeb,
+        debugPrint,
+        debugPrintStack;
 import 'package:path/path.dart';
-import 'package:sqflite/sqflite.dart';
 import 'package:uuid/uuid.dart';
 
 import 'api_service.dart';
 
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
-import 'package:flutter/foundation.dart' show kIsWeb, defaultTargetPlatform, TargetPlatform;
 
 class OfflineSyncService {
   static bool _databaseFactoryInitialized = false;

@@ -78,7 +78,7 @@ class _LoginScreenState extends State<LoginScreen> {
         final prefs = await SharedPreferences.getInstance();
         // Remove the prior account's cached profile before switching sessions.
         await prefs.remove('cached_employee');
-        await prefs.setString('token', token);
+        await ApiService.storeToken(token);
         await prefs.setString('user', jsonEncode(user));
         unawaited(OfflineSyncService.syncPendingLeaves());
 

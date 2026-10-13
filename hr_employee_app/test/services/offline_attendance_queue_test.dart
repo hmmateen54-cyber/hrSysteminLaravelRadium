@@ -37,6 +37,8 @@ void main() {
       expect(item['latitude'], 24.8607123);
       expect(item['longitude'], 67.0011456);
       expect(item['accuracy'], 8.45);
+      expect(item['address_status'], 'pending');
+      expect(item['address'], isNull);
     },
   );
 }

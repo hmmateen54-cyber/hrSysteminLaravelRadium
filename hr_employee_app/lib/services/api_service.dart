@@ -3,6 +3,7 @@ import 'dart:convert';
 
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 import '../config/api.dart';
 
@@ -11,6 +12,7 @@ class ApiService {
   static Future<void> Function(String message)? onPendingProfile;
   static bool _unauthorizedCallbackRunning = false;
   static bool _pendingProfileCallbackRunning = false;
+  static const FlutterSecureStorage _secureStorage = FlutterSecureStorage();
   static const _timeout = Duration(seconds: 20);
   static const pendingProfileMessage =
       'Your account is registered, but your employee profile is awaiting HR completion. You will be able to log in once HR completes your profile.';
@@ -56,9 +58,8 @@ class ApiService {
     String? explicitToken,
     Duration requestTimeout = _timeout,
   }) async {
-    final prefs = await SharedPreferences.getInstance();
     final token = authenticated
-        ? (explicitToken ?? prefs.getString('token'))
+        ? (explicitToken ?? await getStoredToken())
         : null;
     final headers = <String, String>{'Accept': 'application/json'};
 
@@ -179,8 +180,7 @@ class ApiService {
   ) async {
     if (_pendingProfileCallbackRunning) return;
 
-    final prefs = await SharedPreferences.getInstance();
-    if (prefs.getString('token') != requestToken) return;
+    if (await getStoredToken() != requestToken) return;
 
     _pendingProfileCallbackRunning = true;
     try {
@@ -197,7 +197,7 @@ class ApiService {
         // The pending account is blocked on the server even if revocation is offline.
       }
 
-      if (prefs.getString('token') != requestToken) return;
+      if (await getStoredToken() != requestToken) return;
       await clearSession();
       await onPendingProfile?.call(message);
     } finally {
@@ -223,8 +223,22 @@ class ApiService {
   }
 
   static Future<String?> getStoredToken() async {
+    final secureToken = await _secureStorage.read(key: 'token');
+    if (secureToken != null && secureToken.isNotEmpty) return secureToken;
+
     final prefs = await SharedPreferences.getInstance();
-    return prefs.getString('token');
+    final legacyToken = prefs.getString('token');
+    if (legacyToken == null || legacyToken.isEmpty) return null;
+
+    await _secureStorage.write(key: 'token', value: legacyToken);
+    await prefs.remove('token');
+    return legacyToken;
+  }
+
+  static Future<void> storeToken(String token) async {
+    await _secureStorage.write(key: 'token', value: token);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove('token');
   }
 
   static Future<int?> getCurrentUserId() async {
@@ -262,6 +276,7 @@ class ApiService {
   }
 
   static Future<void> clearSession() async {
+    await _secureStorage.delete(key: 'token');
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove('token');
     await prefs.remove('user');

@@ -59,6 +59,7 @@ Route::middleware(['auth'])->group(function () {
 
     Route::middleware('role:admin,hr')->group(function () {
         Route::resource('employees', EmployeeController::class);
+        Route::patch('/employees/{employee}/account-status', [EmployeeController::class, 'updateAccountStatus'])->name('employees.account-status');
         Route::resource('attendances', AttendanceController::class);
         Route::get('/location-events', [LocationEventManagementController::class, 'index'])->name('location-events.index');
         Route::get('/leaves', [LeaveController::class, 'index'])->name('leaves.index');
@@ -81,35 +82,8 @@ Route::middleware(['auth'])->group(function () {
 // Practice Routes
 
 Route::middleware(['auth', 'role:admin,hr'])->group(function () {
-Route::get('/query-practice' , [PracticeController::class , 'queryPractice']);
-Route::get('/query-practice' , [PracticeController::class , 'queryPractice1']);
-Route::get('/query-practice' , [PracticeController::class , 'queryPractice2']);
-Route::get('/query-practice' , [PracticeController::class , 'queryPractice3']);
-Route::get('/query-practice' , [PracticeController::class , 'queryPractice4']);
-Route::get('/query-practice' , [PracticeController::class , 'queryPractice5']);
-Route::get('/query-practice' , [PracticeController::class , 'queryPractice6']);
-Route::get('/query-practice' , [PracticeController::class , 'queryPractice7']);
-Route::get('/query-practice' , [PracticeController::class , 'queryPractice8']);
-Route::get('/query-practice' , [PracticeController::class , 'queryPractice9']);
-Route::get('/query-practice' , [PracticeController::class , 'queryPractice10']);
-Route::get('/query-practice' , [PracticeController::class , 'queryPractice11']);
-Route::get('/query-practice' , [PracticeController::class , 'queryPractice12']);
-Route::get('/query-practice' , [PracticeController::class , 'queryPractice13']);
-Route::get('/query-practice' , [PracticeController::class , 'queryPractice14']);
-Route::get('/query-practice' , [PracticeController::class , 'queryPractice15']);
-Route::get('/query-practice' , [PracticeController::class , 'queryPractice16']);
-Route::get('/query-practice' , [PracticeController::class , 'queryPractice17']);
-Route::get('/query-practice' , [PracticeController::class , 'queryPractice18']);
-Route::get('/query-practice' , [PracticeController::class , 'queryPractice19']);
-Route::get('/query-practice' , [PracticeController::class , 'queryPractice20']);
-Route::get('/query-practice' , [PracticeController::class , 'queryPractice21']);
-Route::get('/query-practice' , [PracticeController::class , 'queryPractice22']);
-Route::get('/query-practice' , [PracticeController::class , 'queryPractice23']);
-Route::get('/query-practice' , [PracticeController::class , 'queryPractice24']);
-Route::get('/query-practice' , [PracticeController::class , 'queryPractice25']);
-Route::get('/query-practice2' , [Practice2Controller::class , 'eloquentPractice']);
-Route::get('/query-practice2' , [Practice2Controller::class , 'eloquentPractice2']);
-Route::get('/query-practice2' , [Practice2Controller::class , 'eloquentPractice3']);
-Route::get('/query-practice2' , [Practice2Controller::class , 'eloquentPractice4']);
-Route::get('/query-practice2' , [Practice2Controller::class , 'eloquentPractice5']);
+    // Keep the currently effective examples; earlier same-URI registrations
+    // were overwritten during route registration.
+    Route::get('/query-practice', [PracticeController::class, 'queryPractice25']);
+    Route::get('/query-practice2', [Practice2Controller::class, 'eloquentPractice5']);
 });

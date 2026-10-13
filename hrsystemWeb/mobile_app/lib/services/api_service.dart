@@ -3,12 +3,14 @@ import 'dart:convert';
 
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 import '../config/api.dart';
 
 class ApiService {
   static Future<void> Function()? onUnauthorized;
   static bool _unauthorizedCallbackRunning = false;
+  static const FlutterSecureStorage _secureStorage = FlutterSecureStorage();
   static const _timeout = Duration(seconds: 20);
 
   static Future<Map<String, dynamic>> get(
@@ -51,8 +53,7 @@ class ApiService {
     bool authenticated = true,
     Duration requestTimeout = _timeout,
   }) async {
-    final prefs = await SharedPreferences.getInstance();
-    final token = authenticated ? prefs.getString('token') : null;
+    final token = authenticated ? await getStoredToken() : null;
     final headers = <String, String>{'Accept': 'application/json'};
 
     if (body != null) headers['Content-Type'] = 'application/json';
@@ -139,8 +140,22 @@ class ApiService {
   }
 
   static Future<String?> getStoredToken() async {
+    final secureToken = await _secureStorage.read(key: 'token');
+    if (secureToken != null && secureToken.isNotEmpty) return secureToken;
+
     final prefs = await SharedPreferences.getInstance();
-    return prefs.getString('token');
+    final legacyToken = prefs.getString('token');
+    if (legacyToken == null || legacyToken.isEmpty) return null;
+
+    await _secureStorage.write(key: 'token', value: legacyToken);
+    await prefs.remove('token');
+    return legacyToken;
+  }
+
+  static Future<void> storeToken(String token) async {
+    await _secureStorage.write(key: 'token', value: token);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove('token');
   }
 
   static Future<int?> getCurrentUserId() async {
@@ -178,6 +193,7 @@ class ApiService {
   }
 
   static Future<void> clearSession() async {
+    await _secureStorage.delete(key: 'token');
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove('token');
     await prefs.remove('user');

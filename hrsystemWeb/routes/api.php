@@ -217,7 +217,6 @@ Route::middleware(['auth:sanctum', 'role:admin'])
                 ->whereHas('assignments', fn ($query) => $query->where('status', '!=', 'completed'))
                 ->count(),
             'new_feedback' => \App\Models\Feedback::where('status', 'new')->count(),
-            'locations_received' => \App\Models\LocationEvent::count(),
         ]);
     });
 
@@ -384,6 +383,7 @@ Route::middleware(['auth:sanctum', 'role:employee'])->get('/employee/attendance'
         ->select(['id', 'employee_id', 'attendance_date', 'status', 'check_in', 'check_out', 'remarks', 'sync_id', 'created_at', 'updated_at'])
         ->with(['locationEvents' => fn ($query) => $query->select([
             'id', 'attendance_id', 'client_event_id', 'event_type', 'recorded_at', 'action_at', 'accuracy', 'synced_at',
+            'address', 'address_status', 'address_resolved_at',
         ])])
         ->orderBy('attendance_date', 'desc')
         ->get();
@@ -512,6 +512,10 @@ Route::middleware(['auth:sanctum', 'role:employee'])
 // available for already-installed app versions and web integrations.
 Route::middleware(['auth:sanctum', 'role:employee'])
     ->post('/employee/attendance-actions', [ApiAttendanceController::class, 'store']);
+
+Route::middleware(['auth:sanctum', 'role:employee'])
+    ->post('/employee/attendance-actions/{clientEventId}/resolve-address', [ApiAttendanceController::class, 'resolveAddress'])
+    ->whereUuid('clientEventId');
 
 
 Route::middleware(['auth:sanctum', 'role:employee'])->get('/employee/performance', function (Request $request) {

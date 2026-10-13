@@ -21,7 +21,7 @@ class RoleMiddleware
         }
 
         if ($user->isInactiveEmployee()) {
-            $message = 'Your account is registered, but your employee profile is awaiting HR completion. You will be able to log in once HR completes your profile.';
+            $message = $user->inactiveEmployeeMessage();
 
             if ($request->expectsJson()) {
                 return response()->json(['message' => $message], 403);
