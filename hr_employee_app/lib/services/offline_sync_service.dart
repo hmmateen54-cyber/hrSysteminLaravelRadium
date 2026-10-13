@@ -453,6 +453,101 @@ class OfflineSyncService {
     return id;
   }
 
+  static Future<String> queueAttendanceAction({
+    required String attendanceDate,
+    required String actionType,
+    required DateTime actionAt,
+    required DateTime capturedAt,
+    required double latitude,
+    required double longitude,
+    required double accuracy,
+  }) async {
+    final parsedDate = DateTime.tryParse(attendanceDate);
+    if (!RegExp(r'^\d{4}-\d{2}-\d{2}$').hasMatch(attendanceDate) ||
+        parsedDate == null ||
+        parsedDate.toIso8601String().substring(0, 10) != attendanceDate) {
+      throw ArgumentError('Enter a valid attendance date.');
+    }
+    if (actionType != 'check_in' && actionType != 'check_out') {
+      throw ArgumentError('Choose a valid attendance action.');
+    }
+    if (!latitude.isFinite ||
+        !longitude.isFinite ||
+        latitude < -90 ||
+        latitude > 90 ||
+        longitude < -180 ||
+        longitude > 180) {
+      throw ArgumentError('The location coordinates are invalid.');
+    }
+    if (!accuracy.isFinite || accuracy < 0 || accuracy > 100) {
+      throw ArgumentError('The GPS accuracy is outside the attendance limit.');
+    }
+
+    final actionDate =
+        '${actionAt.year.toString().padLeft(4, '0')}-'
+        '${actionAt.month.toString().padLeft(2, '0')}-'
+        '${actionAt.day.toString().padLeft(2, '0')}';
+    final actionTime =
+        '${actionAt.hour.toString().padLeft(2, '0')}:'
+        '${actionAt.minute.toString().padLeft(2, '0')}:'
+        '${actionAt.second.toString().padLeft(2, '0')}';
+    if (actionType == 'check_in' && actionDate != attendanceDate) {
+      throw ArgumentError('Check-in date must match the attendance date.');
+    }
+
+    final owner = await _currentOwnerId();
+    final db = await database;
+    late String queueId;
+    await db.transaction((txn) async {
+      final existingItems = await txn.query(
+        'sync_queue',
+        where: 'owner_id = ? AND operation = ?',
+        whereArgs: [owner, 'attendance'],
+      );
+      for (final item in existingItems) {
+        final payload = jsonDecode(item['payload'] as String);
+        if (payload is! Map ||
+            payload['attendance_date']?.toString() != attendanceDate) {
+          continue;
+        }
+        final queuedAction = payload['action_type']?.toString() ?? 'check_in';
+        if (queuedAction == actionType) {
+          throw StateError(
+            actionType == 'check_in'
+                ? 'Attendance already has a check-in for this date.'
+                : 'Attendance already has a check-out for this date.',
+          );
+        }
+      }
+
+      final clientId = _uuid.v4();
+      queueId = 'attendance-$owner-$clientId';
+      final payload = {
+        'action_type': actionType,
+        'attendance_date': attendanceDate,
+        'action_date': actionDate,
+        'action_time': actionTime,
+        'action_at': actionAt.toUtc().toIso8601String(),
+        'captured_at': capturedAt.toUtc().toIso8601String(),
+        'latitude': latitude,
+        'longitude': longitude,
+        'accuracy': accuracy,
+      };
+      await txn.insert('sync_queue', {
+        'queue_id': queueId,
+        'owner_id': owner,
+        'operation': 'attendance',
+        'client_id': clientId,
+        'payload': jsonEncode(payload),
+        'created_at': DateTime.now().toUtc().toIso8601String(),
+        'status': 'waiting',
+      });
+    });
+
+    _queueChanged();
+    return queueId;
+  }
+
   static Future<List<Map<String, dynamic>>> getQueueItems({
     String? operation,
     bool includeSynced = true,
@@ -592,7 +687,10 @@ class OfflineSyncService {
     try {
       final endpoint = switch (operation) {
         'leave' => '/employee/leaves',
-        'attendance' => '/employee/attendance',
+        'attendance' =>
+          payload.containsKey('action_type')
+              ? '/employee/attendance-actions'
+              : '/employee/attendance',
         'location' => '/employee/location-events',
         'feedback' => '/employee/feedback',
         _ => throw StateError('Unsupported queued operation'),
@@ -600,13 +698,24 @@ class OfflineSyncService {
       final body = operation == 'leave'
           ? {...payload, 'sync_id': clientId}
           : operation == 'attendance'
-          ? {...payload, 'sync_id': clientId}
+          ? payload.containsKey('action_type')
+                ? {...payload, 'client_event_id': clientId}
+                : {...payload, 'sync_id': clientId}
           : payload;
       final response = await ApiService.post(endpoint, body);
       final status = response['status'];
       final data = response['data'];
 
       if (ApiService.isSuccess(status)) {
+        if (operation == 'attendance' &&
+            payload.containsKey('action_type') &&
+            !_isAttendanceActionConfirmed(data, clientId)) {
+          await _markRetry(
+            row,
+            'The server response did not confirm the saved attendance location. The event remains queued.',
+          );
+          return;
+        }
         final record = data is Map
             ? data[switch (operation) {
                 'location' => 'event',
@@ -622,8 +731,11 @@ class OfflineSyncService {
             'server_record_id': serverId is int
                 ? serverId
                 : int.tryParse('$serverId'),
-            'synced_at': record is Map
-                ? record['synced_at']?.toString() ??
+            'synced_at': data is Map
+                ? data['server_confirmed_at']?.toString() ??
+                      (record is Map
+                          ? record['synced_at']?.toString()
+                          : null) ??
                       DateTime.now().toUtc().toIso8601String()
                 : DateTime.now().toUtc().toIso8601String(),
             'last_error': null,
@@ -665,6 +777,19 @@ class OfflineSyncService {
       );
       debugPrint('Queued $operation sync failed: ${error.runtimeType}');
     }
+  }
+
+  static bool _isAttendanceActionConfirmed(dynamic data, String clientId) {
+    if (data is! Map) return false;
+    final attendance = data['attendance'];
+    final event = data['event'];
+    return attendance is Map &&
+        attendance['id'] != null &&
+        event is Map &&
+        event['id'] != null &&
+        event['client_event_id']?.toString() == clientId &&
+        event['synced_at'] != null &&
+        data['server_confirmed_at'] != null;
   }
 
   static String _safeServerMessage(dynamic data, dynamic status) {

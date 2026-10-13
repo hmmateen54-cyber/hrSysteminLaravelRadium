@@ -6,6 +6,7 @@ use App\Models\User;
 use App\Models\Employee;
 use App\Models\Attendance;
 use App\Http\Controllers\Api\AuthController;
+use App\Http\Controllers\Api\AttendanceController as ApiAttendanceController;
 use App\Http\Controllers\Api\LocationEventController;
 use App\Http\Controllers\Api\EmployeeLeaveController;
 use App\Http\Controllers\TaskController;
@@ -381,6 +382,9 @@ Route::middleware(['auth:sanctum', 'role:employee'])->get('/employee/attendance'
 
     $attendance = $employee->attendances()
         ->select(['id', 'employee_id', 'attendance_date', 'status', 'check_in', 'check_out', 'remarks', 'sync_id', 'created_at', 'updated_at'])
+        ->with(['locationEvents' => fn ($query) => $query->select([
+            'id', 'attendance_id', 'client_event_id', 'event_type', 'recorded_at', 'action_at', 'accuracy', 'synced_at',
+        ])])
         ->orderBy('attendance_date', 'desc')
         ->get();
 
@@ -502,6 +506,12 @@ Route::middleware(['auth:sanctum', 'role:employee'])
             ], 201);
         });
     });
+
+// Mobile attendance actions require a fresh GPS event and are stored with the
+// attendance mutation in one transaction. The older POST route above remains
+// available for already-installed app versions and web integrations.
+Route::middleware(['auth:sanctum', 'role:employee'])
+    ->post('/employee/attendance-actions', [ApiAttendanceController::class, 'store']);
 
 
 Route::middleware(['auth:sanctum', 'role:employee'])->get('/employee/performance', function (Request $request) {

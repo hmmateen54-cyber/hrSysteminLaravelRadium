@@ -10,7 +10,7 @@ class LocationEventManagementController extends Controller
     public function index()
     {
         $events = LocationEvent::query()
-            ->select(['id', 'employee_id', 'purpose', 'recorded_at', 'synced_at'])
+            ->select(['id', 'employee_id', 'purpose', 'event_type', 'accuracy', 'recorded_at', 'synced_at'])
             ->with('employee.user:id,name')
             ->latest('recorded_at')
             ->paginate(25);
@@ -21,7 +21,7 @@ class LocationEventManagementController extends Controller
     public function apiIndex(Request $request)
     {
         $query = LocationEvent::query()
-            ->select(['id', 'employee_id', 'purpose', 'recorded_at', 'synced_at'])
+            ->select(['id', 'employee_id', 'purpose', 'event_type', 'accuracy', 'recorded_at', 'synced_at'])
             ->with('employee:id,user_id,employee_id')
             ->with('employee.user:id,name')
             ->latest('recorded_at');

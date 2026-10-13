@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use App\Models\Employee;
 
 class Attendance extends Model
@@ -28,5 +29,10 @@ class Attendance extends Model
     public function employee()
     {
         return $this->belongsTo(Employee::class, 'employee_id');
+    }
+
+    public function locationEvents(): HasMany
+    {
+        return $this->hasMany(LocationEvent::class);
     }
 }

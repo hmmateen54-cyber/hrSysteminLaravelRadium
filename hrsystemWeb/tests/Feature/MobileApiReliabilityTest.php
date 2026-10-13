@@ -3,10 +3,12 @@
 namespace Tests\Feature;
 
 use App\Models\Employee;
+use App\Models\Attendance;
 use App\Models\Leave;
 use App\Models\LocationEvent;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Carbon;
 use Tests\TestCase;
 
 class MobileApiReliabilityTest extends TestCase
@@ -135,6 +137,141 @@ class MobileApiReliabilityTest extends TestCase
             ->assertJsonMissingPath('attendance.0.employee.salary');
 
         $this->assertSame(1, \App\Models\Attendance::where('employee_id', $employee->getKey())->count());
+    }
+
+    public function test_attendance_actions_persist_gps_for_check_in_and_check_out_and_are_idempotent(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2026-10-13 18:00:00 UTC'));
+        [$user, $employee] = $this->employeeAccount('gps-attendance@example.test', '125');
+        [, $otherEmployee] = $this->employeeAccount('gps-other@example.test', '126');
+        $token = $user->createToken('gps-attendance-test')->plainTextToken;
+        $checkIn = [
+            'action_type' => 'check_in',
+            'client_event_id' => 'f4cb3588-3e79-4f84-a503-29c949c3fe27',
+            'attendance_date' => '2026-10-13',
+            'action_date' => '2026-10-13',
+            'action_time' => '08:30:00',
+            'action_at' => '2026-10-13T03:30:00Z',
+            'captured_at' => '2026-10-13T03:30:04Z',
+            'latitude' => 24.8607123,
+            'longitude' => 67.0011456,
+            'accuracy' => 8.45,
+            // Ownership must come from Sanctum, even if a client sends this.
+            'employee_id' => $otherEmployee->getKey(),
+        ];
+
+        $this->withToken($token)
+            ->postJson('/api/employee/attendance-actions', $checkIn)
+            ->assertCreated()
+            ->assertJsonPath('attendance.employee_id', $employee->getKey())
+            ->assertJsonPath('attendance.check_in', '08:30:00')
+            ->assertJsonPath('event.event_type', 'check_in')
+            ->assertJsonPath('event.latitude', '24.8607123')
+            ->assertJsonPath('event.longitude', '67.0011456')
+            ->assertJsonPath('event.accuracy', '8.45')
+            ->assertJsonPath('event.client_event_id', $checkIn['client_event_id'])
+            ->assertJsonStructure(['server_confirmed_at']);
+
+        $attendance = Attendance::query()->where('employee_id', $employee->getKey())->firstOrFail();
+        $checkInEvent = $attendance->locationEvents()->firstOrFail();
+        $this->assertSame('24.8607123', $checkInEvent->latitude);
+        $this->assertSame('67.0011456', $checkInEvent->longitude);
+        $this->assertSame('8.45', $checkInEvent->accuracy);
+        $this->assertSame('2026-10-13 03:30:04', $checkInEvent->recorded_at->format('Y-m-d H:i:s'));
+        $this->assertSame($employee->getKey(), $checkInEvent->employee_id);
+
+        $this->withToken($token)
+            ->postJson('/api/employee/attendance-actions', $checkIn)
+            ->assertOk()
+            ->assertJsonPath('attendance.id', $attendance->getKey());
+
+        $checkOut = [
+            ...$checkIn,
+            'action_type' => 'check_out',
+            'client_event_id' => '48b0fcaf-2f81-42ec-b217-5ea22e13c10d',
+            'action_time' => '17:15:00',
+            'action_at' => '2026-10-13T12:15:00Z',
+            'captured_at' => '2026-10-13T12:15:02Z',
+            'latitude' => 24.8611123,
+        ];
+
+        $this->withToken($token)
+            ->postJson('/api/employee/attendance-actions', $checkOut)
+            ->assertCreated()
+            ->assertJsonPath('attendance.id', $attendance->getKey())
+            ->assertJsonPath('attendance.check_out', '17:15:00')
+            ->assertJsonPath('event.event_type', 'check_out');
+
+        $this->withToken($token)
+            ->postJson('/api/employee/attendance-actions', $checkOut)
+            ->assertOk();
+
+        $this->assertSame(2, $attendance->locationEvents()->count());
+        $this->assertSame('17:15:00', $attendance->fresh()->check_out);
+
+        $this->withToken($token)
+            ->getJson('/api/employee/attendance')
+            ->assertOk()
+            ->assertJsonPath('attendance.0.location_events.0.event_type', 'check_in')
+            ->assertJsonMissingPath('attendance.0.location_events.0.latitude')
+            ->assertJsonMissingPath('attendance.0.location_events.0.longitude');
+
+        $secondCheckout = [
+            ...$checkOut,
+            'client_event_id' => '2f96f60e-6011-49ee-8c40-d51335542a6d',
+        ];
+        $this->withToken($token)
+            ->postJson('/api/employee/attendance-actions', $secondCheckout)
+            ->assertStatus(409);
+    }
+
+    public function test_attendance_action_requires_valid_fresh_location_data_and_cannot_target_another_employee(): void
+    {
+        Carbon::setTestNow(Carbon::parse('2026-10-13 18:00:00 UTC'));
+        [$user, $employee] = $this->employeeAccount('gps-validation@example.test', '127');
+        [, $otherEmployee] = $this->employeeAccount('gps-validation-other@example.test', '128');
+        $token = $user->createToken('gps-validation-test')->plainTextToken;
+        $payload = [
+            'action_type' => 'check_in',
+            'client_event_id' => 'f89d82d7-401e-4423-9e21-7d1a17b6afc2',
+            'attendance_date' => '2026-10-13',
+            'action_date' => '2026-10-13',
+            'action_time' => '09:00:00',
+            'action_at' => '2026-10-13T04:00:00Z',
+            'captured_at' => '2026-10-13T04:00:03Z',
+            'latitude' => 24.8607,
+            'longitude' => 67.0011,
+            'accuracy' => 12.0,
+        ];
+
+        $this->withToken($token)
+            ->postJson('/api/employee/attendance-actions', [
+                ...$payload,
+                'latitude' => 91,
+            ])
+            ->assertUnprocessable();
+        $this->assertSame(0, Attendance::count());
+        $this->assertSame(0, LocationEvent::count());
+
+        $this->withToken($token)
+            ->postJson('/api/employee/attendance-actions', [
+                ...$payload,
+                'accuracy' => 140,
+                'employee_id' => $otherEmployee->getKey(),
+            ])
+            ->assertUnprocessable();
+        $this->assertSame(0, Attendance::count());
+
+        $this->withToken($token)
+            ->postJson('/api/employee/attendance-actions', [
+                ...$payload,
+                'employee_id' => $otherEmployee->getKey(),
+            ])
+            ->assertCreated()
+            ->assertJsonPath('attendance.employee_id', $employee->getKey());
+
+        $this->assertSame(1, Attendance::where('employee_id', $employee->getKey())->count());
+        $this->assertSame(0, Attendance::where('employee_id', $otherEmployee->getKey())->count());
     }
 
     public function test_hr_and_admin_dashboard_counts_refresh_after_leave_review(): void
@@ -290,5 +427,11 @@ class MobileApiReliabilityTest extends TestCase
         ]);
 
         return [$user, $employee];
+    }
+
+    protected function tearDown(): void
+    {
+        Carbon::setTestNow();
+        parent::tearDown();
     }
 }

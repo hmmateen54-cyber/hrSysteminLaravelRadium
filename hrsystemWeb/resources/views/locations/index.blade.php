@@ -23,7 +23,7 @@
         @else
             <div class="table-wrap">
                 <table class="data-table">
-                    <thead><tr><th>Employee</th><th>Purpose</th><th>Captured at</th><th>Server confirmed</th><th>Status</th></tr></thead>
+                    <thead><tr><th>Employee</th><th>Attendance action</th><th>GPS accuracy</th><th>Captured at</th><th>Server confirmed</th><th>Status</th></tr></thead>
                     <tbody>
                         @foreach($events as $event)
                             <tr>
@@ -31,7 +31,8 @@
                                     <span class="table-primary">{{ $event->employee?->user?->name ?? 'Unknown employee' }}</span>
                                     <div class="table-secondary">{{ $event->employee?->employee_id ?? '—' }}</div>
                                 </td>
-                                <td>{{ $event->purpose ?: 'Attendance location check' }}</td>
+                                <td>{{ $event->event_type ? str_replace('_', ' ', ucfirst($event->event_type)) : ($event->purpose ?: 'Location check') }}</td>
+                                <td>{{ $event->accuracy !== null ? number_format((float) $event->accuracy, 0) . ' m' : '—' }}</td>
                                 <td>{{ $event->recorded_at?->timezone(config('app.timezone'))->format('d M Y, H:i') ?? '—' }}</td>
                                 <td>{{ $event->synced_at?->timezone(config('app.timezone'))->format('d M Y, H:i') ?? '—' }}</td>
                                 <td><span class="badge badge-approved">Location recorded</span></td>

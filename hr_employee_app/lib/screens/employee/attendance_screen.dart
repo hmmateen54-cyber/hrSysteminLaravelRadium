@@ -10,13 +10,14 @@ import '../../components/app_empty_state.dart';
 import '../../components/app_section_header.dart';
 import '../../components/app_status_badge.dart';
 import '../../services/api_service.dart';
+import '../../services/attendance_location_service.dart';
 import '../../services/auto_refresh_controller.dart';
 import '../../services/offline_sync_service.dart';
 import '../../theme/app_colors.dart';
 import '../../theme/app_radius.dart';
 import '../../theme/app_spacing.dart';
 
-enum _LocationState { neutral, loading, available, waiting, uploaded, error }
+enum _LocationState { neutral, loading, waiting, uploaded, error }
 
 class AttendanceScreen extends StatefulWidget {
   const AttendanceScreen({super.key});
@@ -41,6 +42,9 @@ class _AttendanceScreenState extends State<AttendanceScreen>
   String locationMessage = 'Location has not been requested.';
   _LocationState locationState = _LocationState.neutral;
   String? locationQueueId;
+  bool _locationSyncFailed = false;
+  final AttendanceLocationService _locationService =
+      AttendanceLocationService();
 
   @override
   void initState() {
@@ -53,7 +57,10 @@ class _AttendanceScreenState extends State<AttendanceScreen>
     _refreshLocationStatus();
   }
 
-  void _onQueueChanged() => unawaited(getAttendance());
+  void _onQueueChanged() {
+    unawaited(getAttendance());
+    unawaited(_refreshLocationStatus());
+  }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
@@ -67,7 +74,7 @@ class _AttendanceScreenState extends State<AttendanceScreen>
   Future<void> _refreshLocationStatus() async {
     try {
       final rows = await OfflineSyncService.getQueueItems(
-        operation: 'location',
+        operation: 'attendance',
       );
       if (rows.isEmpty || !mounted) return;
       final item = rows.firstWhere(
@@ -76,24 +83,41 @@ class _AttendanceScreenState extends State<AttendanceScreen>
       );
       locationQueueId = item['queue_id']?.toString();
       final status = item['sync_status'];
+      final accuracy = double.tryParse(item['accuracy']?.toString() ?? '');
+      final capturedAt = DateTime.tryParse(
+        item['captured_at']?.toString() ??
+            item['recorded_at']?.toString() ??
+            '',
+      );
+      final action = item['action_type'] == 'check_out'
+          ? 'Check-out'
+          : 'Check-in';
+      final details = [
+        if (accuracy != null) 'GPS accuracy about ${accuracy.round()}m',
+        if (capturedAt != null) 'captured ${capturedAt.toLocal()}',
+      ].join(' · ');
 
       setState(() {
         if (status == 'synced') {
+          _locationSyncFailed = false;
           locationState = _LocationState.uploaded;
           final syncedAt = DateTime.tryParse(
             item['synced_at']?.toString() ?? '',
           );
           locationMessage = syncedAt == null
-              ? 'Location confirmed by the server.'
-              : 'Location confirmed by the server at ${syncedAt.toLocal()}.';
+              ? '$action location confirmed by the server${details.isEmpty ? '.' : ' · $details.'}'
+              : '$action location confirmed by the server at ${syncedAt.toLocal()}${details.isEmpty ? '.' : ' · $details.'}';
         } else if (status == 'failed') {
+          _locationSyncFailed = true;
+          locationState = _LocationState.error;
+          locationMessage =
+              'Synchronization failed; the captured location is still saved on this device. '
+              '${item['last_error']?.toString() ?? 'Retry when your connection is available.'}';
+        } else {
+          _locationSyncFailed = false;
           locationState = _LocationState.waiting;
           locationMessage =
-              'Location needs attention: '
-              '${item['last_error']?.toString() ?? 'sync failed'}';
-        } else {
-          locationState = _LocationState.waiting;
-          locationMessage = 'Location saved offline — waiting to sync.';
+              '$action location saved on this device and waiting to sync${details.isEmpty ? '.' : ' · $details.'}';
         }
       });
     } catch (_) {
@@ -231,12 +255,47 @@ class _AttendanceScreenState extends State<AttendanceScreen>
     List<Map<String, dynamic>> local,
     List<Map<String, dynamic>> remote,
   ) {
-    final localOnly = local.where((item) {
-      final clientId = item['client_id']?.toString();
-      return clientId == null ||
-          !remote.any((row) => row['sync_id']?.toString() == clientId);
-    });
-    final merged = <Map<String, dynamic>>[...localOnly, ...remote];
+    final mergedByDate = <String, Map<String, dynamic>>{
+      for (final row in remote)
+        if (row['attendance_date'] != null)
+          row['attendance_date'].toString().substring(0, 10):
+              Map<String, dynamic>.from(row),
+    };
+
+    for (final item in local) {
+      final rawDate = item['attendance_date']?.toString();
+      if (rawDate == null || rawDate.length < 10) continue;
+      final date = rawDate.substring(0, 10);
+      final record = mergedByDate.putIfAbsent(
+        date,
+        () => {'attendance_date': date, 'status': 'present'},
+      );
+      final action = item['action_type']?.toString() ?? 'check_in';
+      final time =
+          item['action_time']?.toString() ?? item['check_in']?.toString();
+      if (action == 'check_out') {
+        record['check_out'] ??= time;
+      } else {
+        record['check_in'] ??= time;
+      }
+      final statuses = (record['_local_sync_statuses'] as List<String>? ?? [])
+        ..add(item['sync_status']?.toString() ?? 'waiting');
+      record['_local_sync_statuses'] = statuses;
+      record['sync_status'] = statuses.contains('failed')
+          ? 'failed'
+          : statuses.every((status) => status == 'synced')
+          ? 'synced'
+          : 'waiting';
+      record['last_action_type'] = action;
+      record['last_action_accuracy'] = item['accuracy'];
+      record['last_action_captured_at'] = item['captured_at'];
+      record['last_action_synced_at'] = item['synced_at'];
+      record['last_action_queue_id'] = item['queue_id'];
+      record['last_action_error'] = item['last_error'];
+      record['last_action_server_record_id'] = item['server_record_id'];
+    }
+
+    final merged = mergedByDate.values.toList();
     merged.sort(
       (a, b) => (b['attendance_date']?.toString() ?? '').compareTo(
         a['attendance_date']?.toString() ?? '',
@@ -245,37 +304,91 @@ class _AttendanceScreenState extends State<AttendanceScreen>
     return merged;
   }
 
-  Future<void> handleCheckIn() async {
+  String _dateString(DateTime date) =>
+      '${date.year.toString().padLeft(4, '0')}-'
+      '${date.month.toString().padLeft(2, '0')}-'
+      '${date.day.toString().padLeft(2, '0')}';
+
+  Map<String, dynamic>? get _todayAttendance {
+    final today = _dateString(DateTime.now());
+    for (final record in attendance) {
+      if (record['attendance_date']?.toString().startsWith(today) == true) {
+        return record;
+      }
+    }
+    return null;
+  }
+
+  Map<String, dynamic>? get _openAttendance {
+    for (final record in attendance) {
+      if (record['check_in'] != null && record['check_out'] == null) {
+        return record;
+      }
+    }
+    return null;
+  }
+
+  String? get _nextAction {
+    if (_openAttendance != null) return 'check_out';
+    if (_todayAttendance == null) return 'check_in';
+    return null;
+  }
+
+  Future<void> handleAttendanceAction(String actionType) async {
     if (checkingIn) return;
 
-    final now = DateTime.now();
-    final date =
-        '${now.year.toString().padLeft(4, '0')}-'
-        '${now.month.toString().padLeft(2, '0')}-'
-        '${now.day.toString().padLeft(2, '0')}';
-
-    final alreadyCheckedIn = attendance.any((record) {
-      return record['attendance_date']?.toString().startsWith(date) == true;
-    });
-
-    if (alreadyCheckedIn) {
+    if (_nextAction != actionType) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('You have already checked in today.')),
+        SnackBar(
+          content: Text(
+            actionType == 'check_in'
+                ? 'Today already has an attendance record.'
+                : 'There is no open check-in to check out from.',
+          ),
+        ),
       );
       return;
     }
 
-    setState(() => checkingIn = true);
+    final openAttendance = _openAttendance;
+    if (actionType == 'check_out' &&
+        openAttendance?['sync_status'] == 'failed' &&
+        openAttendance?['last_action_server_record_id'] == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'The check-in must sync successfully before checking out.',
+          ),
+        ),
+      );
+      return;
+    }
+
+    if (!await _explainLocationUse() || !mounted) return;
+
+    setState(() {
+      checkingIn = true;
+      locationState = _LocationState.loading;
+      locationMessage = 'Checking permission and waiting for a fresh GPS fix…';
+    });
 
     try {
-      final time =
-          '${now.hour.toString().padLeft(2, '0')}:'
-          '${now.minute.toString().padLeft(2, '0')}:00';
-
-      final queueId = await OfflineSyncService.queueAttendance(
-        attendanceDate: date,
-        checkIn: time,
+      final actionAt = DateTime.now();
+      final targetDate = actionType == 'check_out'
+          ? openAttendance!['attendance_date'].toString().substring(0, 10)
+          : _dateString(actionAt);
+      final location = await _locationService.capture();
+      if (!mounted) return;
+      final queueId = await OfflineSyncService.queueAttendanceAction(
+        attendanceDate: targetDate,
+        actionType: actionType,
+        actionAt: actionAt,
+        capturedAt: location.capturedAt,
+        latitude: location.latitude,
+        longitude: location.longitude,
+        accuracy: location.accuracyMeters,
       );
+      locationQueueId = queueId;
 
       await OfflineSyncService.syncPendingLeaves(force: true);
 
@@ -283,31 +396,58 @@ class _AttendanceScreenState extends State<AttendanceScreen>
         operation: 'attendance',
       )).where((row) => row['queue_id'] == queueId);
 
-      final status = queued.isEmpty ? 'synced' : queued.first['sync_status'];
+      final status = queued.isEmpty ? 'waiting' : queued.first['sync_status'];
 
       if (!mounted) return;
 
+      await _refreshLocationStatus();
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
             status == 'synced'
-                ? 'Check-in confirmed by the server.'
+                ? '${actionType == 'check_in' ? 'Check-in' : 'Check-out'} and location confirmed by the server.'
                 : status == 'failed'
-                ? 'Attendance sync failed. Please check your connection.'
-                : 'Check-in saved on this device and waiting to sync.',
+                ? 'Synchronization failed. The attendance and GPS reading remain saved on this device.'
+                : 'Attendance and GPS reading saved on this device and waiting to sync.',
           ),
         ),
       );
 
       await getAttendance();
+    } on AttendanceLocationException catch (exception) {
+      var openSettings = false;
+      var settingsAction = '';
+      if (exception.issue ==
+          AttendanceLocationIssue.permissionPermanentlyDenied) {
+        settingsAction = 'Open app settings';
+      } else if (exception.issue == AttendanceLocationIssue.servicesDisabled) {
+        settingsAction = 'Location settings';
+      }
+      if (settingsAction.isNotEmpty && mounted) {
+        openSettings = await _showLocationIssue(
+          exception.message,
+          action: settingsAction,
+        );
+        if (openSettings) {
+          if (exception.issue ==
+              AttendanceLocationIssue.permissionPermanentlyDenied) {
+            await Geolocator.openAppSettings();
+          } else {
+            await Geolocator.openLocationSettings();
+          }
+        }
+      }
+      _setLocationError(exception.message);
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(exception.message)));
+      }
     } catch (e) {
       if (!mounted) return;
-
-      final message =
-          e.toString().contains('Attendance already exists for this date')
-          ? 'You have already checked in today.'
-          : 'Could not save check-in on this device.';
-
+      final message = 'Could not save attendance on this device: $e';
+      _setLocationError(message);
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(SnackBar(content: Text(message)));
@@ -322,9 +462,9 @@ class _AttendanceScreenState extends State<AttendanceScreen>
     return await showDialog<bool>(
           context: context,
           builder: (context) => AlertDialog(
-            title: const Text('Share your location?'),
+            title: const Text('Location required for attendance'),
             content: const Text(
-              'Your precise location will be saved with the time of this request for the HR attendance feature. It is only collected after you continue.',
+              'A fresh foreground GPS reading and its reported accuracy will be saved with this check-in or check-out. Location is collected only for this attendance action.',
             ),
             actions: [
               TextButton(
@@ -339,89 +479,6 @@ class _AttendanceScreenState extends State<AttendanceScreen>
           ),
         ) ??
         false;
-  }
-
-  Future<void> handleLocationAction() async {
-    if (locationState == _LocationState.loading) return;
-    if (!await _explainLocationUse() || !mounted) return;
-
-    setState(() {
-      locationState = _LocationState.loading;
-      locationMessage = 'Checking permission and device location…';
-    });
-
-    try {
-      var permission = await Geolocator.checkPermission();
-
-      if (permission == LocationPermission.denied) {
-        permission = await Geolocator.requestPermission();
-      }
-
-      if (permission == LocationPermission.deniedForever) {
-        final openSettings = await _showLocationIssue(
-          'Location permission is blocked. Open app settings to allow location access.',
-          action: 'Open settings',
-        );
-
-        if (openSettings) await Geolocator.openAppSettings();
-
-        _setLocationError(
-          'Location permission is denied. Allow it in app settings and try again.',
-        );
-        return;
-      }
-
-      if (permission == LocationPermission.denied) {
-        _setLocationError(
-          'Location permission was denied. No location was collected.',
-        );
-        return;
-      }
-
-      final enabled = await Geolocator.isLocationServiceEnabled();
-
-      if (!enabled) {
-        final openSettings = await _showLocationIssue(
-          'Device location services are turned off. Enable them to get your current location.',
-          action: 'Location settings',
-        );
-
-        if (openSettings) await Geolocator.openLocationSettings();
-
-        _setLocationError(
-          'Device location services are disabled. No location was collected.',
-        );
-        return;
-      }
-
-      final position = await Geolocator.getCurrentPosition(
-        desiredAccuracy: LocationAccuracy.high,
-        timeLimit: const Duration(seconds: 15),
-      );
-
-      if (!mounted) return;
-
-      setState(() {
-        locationState = _LocationState.available;
-        locationMessage = 'A current location was obtained. Saving the event…';
-      });
-
-      final queuedId = await OfflineSyncService.queueLocationEvent(
-        latitude: position.latitude,
-        longitude: position.longitude,
-        accuracy: position.accuracy,
-        recordedAt: position.timestamp,
-      );
-
-      locationQueueId = queuedId;
-
-      await OfflineSyncService.syncPendingLeaves(force: true);
-      await _refreshLocationStatus();
-    } catch (_) {
-      _setLocationError(
-        'Unable to get a current location. No location event was saved.',
-      );
-    }
   }
 
   Future<bool> _showLocationIssue(
@@ -452,6 +509,7 @@ class _AttendanceScreenState extends State<AttendanceScreen>
     if (!mounted) return;
 
     setState(() {
+      _locationSyncFailed = false;
       locationState = _LocationState.error;
       locationMessage = message;
     });
@@ -513,15 +571,14 @@ class _AttendanceScreenState extends State<AttendanceScreen>
                           children: [
                             Expanded(
                               child: Text(
-                                'Location confirmation',
+                                'Attendance GPS confirmation',
                                 style: Theme.of(context).textTheme.titleSmall,
                               ),
                             ),
                             AppStatusBadge(
                               status: switch (locationState) {
                                 _LocationState.uploaded => 'synced',
-                                _LocationState.waiting ||
-                                _LocationState.available => 'pending',
+                                _LocationState.waiting => 'pending',
                                 _LocationState.loading => 'in_progress',
                                 _LocationState.error => 'failed',
                                 _ => 'neutral',
@@ -529,7 +586,6 @@ class _AttendanceScreenState extends State<AttendanceScreen>
                               label: switch (locationState) {
                                 _LocationState.uploaded => 'Server confirmed',
                                 _LocationState.waiting => 'Waiting to sync',
-                                _LocationState.available => 'Captured',
                                 _LocationState.loading => 'Locating',
                                 _LocationState.error => 'Needs attention',
                                 _ => 'Not recorded',
@@ -542,32 +598,20 @@ class _AttendanceScreenState extends State<AttendanceScreen>
                           locationMessage,
                           style: Theme.of(context).textTheme.bodySmall,
                         ),
-                        const SizedBox(height: AppSpacing.md),
-                        FilledButton.icon(
-                          onPressed: locationState == _LocationState.loading
-                              ? null
-                              : handleLocationAction,
-                          icon: locationState == _LocationState.loading
-                              ? const SizedBox.square(
-                                  dimension: 18,
-                                  child: CircularProgressIndicator(
-                                    strokeWidth: 2,
-                                  ),
-                                )
-                              : const Icon(Icons.my_location),
-                          label: const Text('Capture location'),
-                        ),
-                        if (locationState == _LocationState.waiting) ...[
+                        if (locationState == _LocationState.waiting ||
+                            _locationSyncFailed) ...[
                           const SizedBox(height: 4),
                           TextButton.icon(
                             onPressed: () async {
-                              await OfflineSyncService.syncPendingLeaves(
-                                force: true,
-                              );
-                              await _refreshLocationStatus();
+                              final queueId = locationQueueId;
+                              if (queueId != null) {
+                                await OfflineSyncService.retryQueueItem(
+                                  queueId,
+                                );
+                              }
                             },
                             icon: const Icon(Icons.sync),
-                            label: const Text('Retry location sync'),
+                            label: const Text('Retry attendance sync'),
                           ),
                         ],
                       ],
@@ -600,14 +644,24 @@ class _AttendanceScreenState extends State<AttendanceScreen>
               ],
             ),
       floatingActionButton: FloatingActionButton.extended(
-        onPressed: checkingIn ? null : handleCheckIn,
+        onPressed: checkingIn || _nextAction == null
+            ? null
+            : () => handleAttendanceAction(_nextAction!),
         icon: checkingIn
             ? const SizedBox.square(
                 dimension: 18,
                 child: CircularProgressIndicator(strokeWidth: 2),
               )
-            : const Icon(Icons.fingerprint),
-        label: Text(checkingIn ? 'Saving…' : 'Check in'),
+            : Icon(_nextAction == 'check_out' ? Icons.logout : Icons.login),
+        label: Text(
+          checkingIn
+              ? 'Getting GPS…'
+              : _nextAction == 'check_out'
+              ? 'Check out'
+              : _nextAction == 'check_in'
+              ? 'Check in'
+              : 'Done for today',
+        ),
       ),
     );
   }
@@ -651,7 +705,7 @@ class _AttendanceScreenState extends State<AttendanceScreen>
         ),
         subtitle: Text(
           'Check in: ${record['check_in'] ?? '—'}\n'
-          '${local ? 'Saved on this device.' : 'Check out: ${record['check_out'] ?? '—'}'}',
+          'Check out: ${record['check_out'] ?? '—'}',
         ),
         isThreeLine: true,
         trailing: AppStatusBadge(status: statusKey, label: status),
