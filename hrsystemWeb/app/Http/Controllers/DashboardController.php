@@ -6,6 +6,9 @@ use App\Models\Attendance;
 use App\Models\Employee;
 use App\Models\Leave;
 use App\Models\Performance;
+use App\Models\Task;
+use App\Models\Feedback;
+use App\Models\LocationEvent;
 
 class DashboardController extends Controller
 {
@@ -36,6 +39,11 @@ class DashboardController extends Controller
                 'averageRating' => $employee
                     ? $employee->performances()->avg('rating')
                     : null,
+                'taskCount' => $employee ? $employee->taskAssignments()->count() : 0,
+                'openTaskCount' => $employee
+                    ? $employee->taskAssignments()->whereIn('status', ['assigned', 'in_progress', 'on_hold'])->count()
+                    : 0,
+                'feedbackCount' => Feedback::where('user_id', $user->getKey())->count(),
             ];
         } else {
             $recentLeaves = Leave::with('employee.user')->latest()->limit(6)->get();
@@ -44,6 +52,13 @@ class DashboardController extends Controller
                 'pendingLeaves' => Leave::where('status', 'pending')->count(),
                 'approvedLeaves' => Leave::where('status', 'approved')->count(),
                 'performanceRecords' => Performance::count(),
+                'totalTasks' => Task::count(),
+                'unassignedTasks' => Task::doesntHave('assignments')->count(),
+                'overdueTasks' => Task::whereDate('due_date', '<', today())
+                    ->whereHas('assignments', fn ($query) => $query->where('status', '!=', 'completed'))
+                    ->count(),
+                'newFeedback' => Feedback::where('status', 'new')->count(),
+                'locationsReceived' => LocationEvent::count(),
             ];
 
             if ($user->role === 'admin') {
@@ -114,6 +129,13 @@ class DashboardController extends Controller
             'pendingLeaves' => Leave::where('status', 'pending')->count(),
             'approvedLeaves' => Leave::where('status', 'approved')->count(),
             'performanceRecords' => Performance::count(),
+            'totalTasks' => Task::count(),
+            'unassignedTasks' => Task::doesntHave('assignments')->count(),
+            'overdueTasks' => Task::whereDate('due_date', '<', today())
+                ->whereHas('assignments', fn ($query) => $query->where('status', '!=', 'completed'))
+                ->count(),
+            'newFeedback' => Feedback::where('status', 'new')->count(),
+            'locationsReceived' => LocationEvent::count(),
             'recentLeaves' => Leave::with('employee.user')->latest()->limit(6)->get(),
         ]);
     }
@@ -127,6 +149,13 @@ class DashboardController extends Controller
             'pendingLeaves' => Leave::where('status', 'pending')->count(),
             'approvedLeaves' => Leave::where('status', 'approved')->count(),
             'performanceRecords' => Performance::count(),
+            'totalTasks' => Task::count(),
+            'unassignedTasks' => Task::doesntHave('assignments')->count(),
+            'overdueTasks' => Task::whereDate('due_date', '<', today())
+                ->whereHas('assignments', fn ($query) => $query->where('status', '!=', 'completed'))
+                ->count(),
+            'newFeedback' => Feedback::where('status', 'new')->count(),
+            'locationsReceived' => LocationEvent::count(),
             'recentLeaves' => Leave::with('employee.user')->latest()->limit(6)->get(),
         ]);
     }
@@ -151,6 +180,11 @@ class DashboardController extends Controller
             'recentLeaves' => $leaveQuery()->latest()->limit(5)->get(),
             'performanceCount' => $performanceQuery()->count(),
             'averageRating' => $performanceQuery()->avg('rating'),
+            'taskCount' => $employee?->taskAssignments()->count() ?? 0,
+            'openTaskCount' => $employee?->taskAssignments()
+                ->whereIn('status', ['assigned', 'in_progress', 'on_hold'])
+                ->count() ?? 0,
+            'feedbackCount' => Feedback::where('user_id', $user->getKey())->count(),
             'latestSalary' => $employee?->salaries()->latest('salary_month')->latest('id')->first(),
         ]);
     }

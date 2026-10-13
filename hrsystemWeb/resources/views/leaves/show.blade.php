@@ -1,6 +1,6 @@
 <x-app-layout>
     <x-slot name="header"><h1>Leave request</h1><p>Request details and review status.</p></x-slot>
-    <section class="page-intro"><div><div class="eyebrow">TIME OFF REQUEST</div><h2 class="page-title">{{ $leave->leave_type }} leave</h2><p class="page-subtitle">Submitted {{ $leave->created_at->format('d M Y') }}</p></div><div class="page-actions"><span class="badge badge-{{ $leave->status }}">{{ $leave->status }}</span><a class="btn btn-secondary" href="{{ $canManage ? route('leaves.index') : route('employee.leaves.index') }}">← Back to requests</a></div></section>
+    <section class="page-intro"><div><div class="eyebrow">TIME OFF REQUEST</div><h2 class="page-title">{{ $leave->leave_type }} leave</h2><p class="page-subtitle">Submitted {{ $leave->created_at->format('d M Y') }}</p></div><div class="page-actions"><span class="badge badge-{{ $leave->status }}">{{ $leave->status }}</span>@if(!$canManage && $leave->status === 'pending')<a class="btn btn-primary" href="{{ route('employee.leaves.edit', $leave) }}">Edit request</a>@endif<a class="btn btn-secondary" href="{{ $canManage ? route('leaves.index') : route('employee.leaves.index') }}">← Back to requests</a></div></section>
     <div class="content-grid">
         <section class="panel"><div class="panel-head"><div><h2 class="panel-title">Request details</h2><div class="panel-caption">{{ $canManage ? 'Employee and requested dates' : 'Your submitted information' }}</div></div></div><div class="panel-body">
             <div class="detail-grid">
@@ -12,6 +12,6 @@
         @if($canManage)<section class="panel"><div class="panel-head"><div><h2 class="panel-title">Review request</h2><div class="panel-caption">Record your decision and an optional note.</div></div></div><div class="panel-body">
             @if($leave->status === 'pending')<form action="{{ route('leaves.update', $leave) }}" method="POST">@csrf @method('PATCH')<div class="field"><label for="admin_remarks">HR remarks <span class="optional">· optional</span></label><textarea id="admin_remarks" name="admin_remarks" placeholder="Add a note for the employee">{{ old('admin_remarks', $leave->admin_remarks) }}</textarea>@error('admin_remarks')<p class="field-error">{{ $message }}</p>@enderror @error('status')<p class="field-error">{{ $message }}</p>@enderror</div><div class="form-actions"><button class="btn btn-danger" name="status" value="rejected" type="submit">Reject request</button><button class="btn btn-success" name="status" value="approved" type="submit">Approve request</button></div></form>
             @else<div class="notice-box">This request has been {{ $leave->status }}. The employee can see your decision and remarks in their leave history.</div>@endif
-        </div></section>@endif
+        </div></section>@elseif($leave->status !== 'pending')<section class="panel"><div class="panel-head"><h2 class="panel-title">Request is read-only</h2></div><div class="panel-body"><div class="notice-box">This request has been {{ $leave->status }}. Changes are disabled after a decision.</div></div></section>@endif
     </div>
 </x-app-layout>

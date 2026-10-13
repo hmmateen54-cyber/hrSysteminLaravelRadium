@@ -49,10 +49,17 @@ class OfflineSyncService {
     final dbPath = await getDatabasesPath();
     return openDatabase(
       join(dbPath, 'hr_offline_sync.db'),
-      version: 3,
-      onCreate: (db, _) => _createQueueTable(db),
+      version: 5,
+      onCreate: (db, _) async {
+        await _createQueueTable(db);
+        await _createUserCacheTable(db);
+      },
       onUpgrade: (db, oldVersion, _) async {
         if (oldVersion < 3) await _migrateLegacyQueues(db);
+        if (oldVersion < 4) await _createUserCacheTable(db);
+        if (oldVersion < 5) {
+          await db.execute('ALTER TABLE sync_queue ADD COLUMN synced_at TEXT');
+        }
       },
       onOpen: (db) async {
         await db.update(
@@ -82,6 +89,7 @@ class OfflineSyncService {
         next_attempt_at TEXT,
         last_error TEXT,
         server_record_id INTEGER,
+        synced_at TEXT,
         UNIQUE(owner_id, operation, client_id)
       )
     ''');
@@ -91,6 +99,60 @@ class OfflineSyncService {
     await db.execute(
       'CREATE INDEX sync_queue_owner_operation_idx ON sync_queue(owner_id, operation)',
     );
+  }
+
+  static Future<void> _createUserCacheTable(DatabaseExecutor db) async {
+    await db.execute('''
+      CREATE TABLE user_cache (
+        owner_id TEXT NOT NULL,
+        cache_key TEXT NOT NULL,
+        payload TEXT NOT NULL,
+        fetched_at TEXT NOT NULL,
+        PRIMARY KEY (owner_id, cache_key)
+      )
+    ''');
+  }
+
+  static Future<void> saveCachedItems(
+    String key,
+    List<Map<String, dynamic>> items,
+  ) async {
+    final owner = await ApiService.getCurrentUserId();
+    if (owner == null) return;
+    final db = await database;
+    await db.insert('user_cache', {
+      'owner_id': owner.toString(),
+      'cache_key': key,
+      'payload': jsonEncode(items),
+      'fetched_at': DateTime.now().toUtc().toIso8601String(),
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
+  }
+
+  static Future<Map<String, dynamic>?> readCachedItems(String key) async {
+    final owner = await ApiService.getCurrentUserId();
+    if (owner == null) return null;
+    final db = await database;
+    final rows = await db.query(
+      'user_cache',
+      where: 'owner_id = ? AND cache_key = ?',
+      whereArgs: [owner.toString(), key],
+      limit: 1,
+    );
+    if (rows.isEmpty) return null;
+
+    try {
+      final decoded = jsonDecode(rows.first['payload'] as String);
+      if (decoded is! List) return null;
+      return {
+        'items': decoded
+            .whereType<Map>()
+            .map((item) => Map<String, dynamic>.from(item))
+            .toList(),
+        'fetched_at': rows.first['fetched_at'],
+      };
+    } on FormatException {
+      return null;
+    }
   }
 
   static Future<void> _migrateLegacyQueues(DatabaseExecutor db) async {
@@ -282,6 +344,50 @@ class OfflineSyncService {
     return id;
   }
 
+  static Future<String> queueFeedback({
+    required String category,
+    required String subject,
+    required String message,
+    int? rating,
+  }) async {
+    if (category.trim().isEmpty ||
+        subject.trim().isEmpty ||
+        message.trim().isEmpty) {
+      throw ArgumentError(
+        'Complete the feedback category, subject, and message.',
+      );
+    }
+    if (subject.trim().length > 160 || message.trim().length > 5000) {
+      throw ArgumentError('Feedback is longer than the allowed limit.');
+    }
+    if (rating != null && (rating < 1 || rating > 5)) {
+      throw ArgumentError('Choose a rating from 1 to 5.');
+    }
+
+    final owner = await _currentOwnerId();
+    final db = await database;
+    final clientId = _uuid.v4();
+    final id = 'feedback-$owner-$clientId';
+    final payload = {
+      'client_submission_id': clientId,
+      'category': category,
+      'subject': subject.trim(),
+      'message': message.trim(),
+      'rating': rating,
+    };
+    await db.insert('sync_queue', {
+      'queue_id': id,
+      'owner_id': owner,
+      'operation': 'feedback',
+      'client_id': clientId,
+      'payload': jsonEncode(payload),
+      'created_at': DateTime.now().toUtc().toIso8601String(),
+      'status': 'waiting',
+    });
+    _queueChanged();
+    return id;
+  }
+
   static Future<String> queueAttendance({
     required String attendanceDate,
     required String checkIn,
@@ -382,6 +488,7 @@ class OfflineSyncService {
         'retry_count': row['retry_count'],
         'last_error': row['last_error'],
         'server_record_id': row['server_record_id'],
+        'synced_at': row['synced_at'],
       };
     }).toList();
   }
@@ -425,7 +532,7 @@ class OfflineSyncService {
         return;
       }
 
-      for (final operation in ['leave', 'attendance', 'location']) {
+      for (final operation in ['leave', 'attendance', 'location', 'feedback']) {
         final items = await _rowsReadyToSync(
           owner.toString(),
           operation,
@@ -441,8 +548,7 @@ class OfflineSyncService {
       // Do not log payloads, tokens, or exact coordinates.
       // debugPrint('Offline sync could not run: ${error.runtimeType}');
 
-      debugPrint('Offline sync error: $error');
-      debugPrintStack(label: 'Offline sync stack trace');
+      debugPrint('Offline sync failed (${error.runtimeType}).');
     } finally {
       _syncing = false;
       await _scheduleRetry();
@@ -488,6 +594,7 @@ class OfflineSyncService {
         'leave' => '/employee/leaves',
         'attendance' => '/employee/attendance',
         'location' => '/employee/location-events',
+        'feedback' => '/employee/feedback',
         _ => throw StateError('Unsupported queued operation'),
       };
       final body = operation == 'leave'
@@ -501,7 +608,11 @@ class OfflineSyncService {
 
       if (ApiService.isSuccess(status)) {
         final record = data is Map
-            ? data[operation == 'location' ? 'event' : operation]
+            ? data[switch (operation) {
+                'location' => 'event',
+                'feedback' => 'feedback',
+                _ => operation,
+              }]
             : null;
         final serverId = record is Map ? record['id'] : null;
         await db.update(
@@ -511,6 +622,10 @@ class OfflineSyncService {
             'server_record_id': serverId is int
                 ? serverId
                 : int.tryParse('$serverId'),
+            'synced_at': record is Map
+                ? record['synced_at']?.toString() ??
+                      DateTime.now().toUtc().toIso8601String()
+                : DateTime.now().toUtc().toIso8601String(),
             'last_error': null,
             'next_attempt_at': null,
           },

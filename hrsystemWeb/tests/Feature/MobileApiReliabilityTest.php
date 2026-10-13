@@ -95,13 +95,17 @@ class MobileApiReliabilityTest extends TestCase
         $payload = [
             'attendance_date' => '2026-10-13',
             'check_in' => '08:30:00',
+            'latitude' => 24.8607,
+            'longitude' => 67.0011,
             'sync_id' => '17dcdd87-f5d0-4c75-a7c5-522f615a6877',
         ];
 
         $this->withToken($token)
             ->postJson('/api/employee/attendance', $payload)
             ->assertCreated()
-            ->assertJsonPath('attendance.employee_id', $employee->getKey());
+            ->assertJsonPath('attendance.employee_id', $employee->getKey())
+            ->assertJsonMissingPath('attendance.latitude')
+            ->assertJsonMissingPath('attendance.longitude');
 
         $this->withToken($token)
             ->postJson('/api/employee/attendance', $payload)
@@ -113,6 +117,22 @@ class MobileApiReliabilityTest extends TestCase
                 'sync_id' => '610ae1e0-a3e3-481c-b852-5d723814e28e',
             ])
             ->assertStatus(409);
+
+        $this->withToken($token)
+            ->getJson('/api/employee/attendance')
+            ->assertOk()
+            ->assertJsonMissingPath('attendance.0.latitude')
+            ->assertJsonMissingPath('attendance.0.longitude');
+
+        $admin = User::factory()->create(['role' => 'admin']);
+        $this->app['auth']->forgetGuards();
+        $this->withToken($admin->createToken('attendance-management-test')->plainTextToken)
+            ->getJson('/api/admin/attendance')
+            ->assertOk()
+            ->assertJsonPath('attendance.0.employee.employee_id', '124')
+            ->assertJsonMissingPath('attendance.0.latitude')
+            ->assertJsonMissingPath('attendance.0.longitude')
+            ->assertJsonMissingPath('attendance.0.employee.salary');
 
         $this->assertSame(1, \App\Models\Attendance::where('employee_id', $employee->getKey())->count());
     }
@@ -191,6 +211,16 @@ class MobileApiReliabilityTest extends TestCase
         $this->assertSame($user->getKey(), LocationEvent::first()->user_id);
         $this->assertSame($employee->getKey(), LocationEvent::first()->employee_id);
 
+        $hr = User::factory()->create(['role' => 'hr']);
+        $this->app['auth']->forgetGuards();
+        $this->withToken($hr->createToken('location-management-test')->plainTextToken)
+            ->getJson('/api/management/location-events')
+            ->assertOk()
+            ->assertJsonPath('events.data.0.employee.employee_id', '121')
+            ->assertJsonMissingPath('events.data.0.latitude')
+            ->assertJsonMissingPath('events.data.0.longitude');
+
+        $this->app['auth']->forgetGuards();
         $this->withToken($token)
             ->postJson('/api/employee/location-events', [
                 ...$payload,

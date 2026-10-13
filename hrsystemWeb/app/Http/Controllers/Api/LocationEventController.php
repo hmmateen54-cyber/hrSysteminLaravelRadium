@@ -40,6 +40,7 @@ class LocationEventController extends Controller
             $event = LocationEvent::create($validated + [
                 'user_id' => $user->getKey(),
                 'employee_id' => $employee->getKey(),
+                'synced_at' => now(),
             ]);
         } catch (QueryException $exception) {
             $event = LocationEvent::query()
@@ -60,6 +61,7 @@ class LocationEventController extends Controller
                 'id' => $event->getKey(),
                 'client_event_id' => $event->client_event_id,
                 'recorded_at' => $event->recorded_at,
+                'synced_at' => $event->synced_at,
             ],
         ], 201);
     }
@@ -90,6 +92,7 @@ class LocationEventController extends Controller
                 'id' => $event->getKey(),
                 'client_event_id' => $event->client_event_id,
                 'recorded_at' => $event->recorded_at,
+                'synced_at' => $event->synced_at,
             ],
         ]);
     }

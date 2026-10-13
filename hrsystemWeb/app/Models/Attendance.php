@@ -7,6 +7,8 @@ use App\Models\Employee;
 
 class Attendance extends Model
 {
+    protected $hidden = ['latitude', 'longitude'];
+
     protected $fillable = [
         'employee_id',
         'attendance_date',

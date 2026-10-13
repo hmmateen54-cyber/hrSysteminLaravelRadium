@@ -6,7 +6,7 @@
 
     @if($role === 'employee')
         <section class="page-intro">
-            <div><div class="eyebrow">EMPLOYEE PORTAL</div><h2 class="page-title">Good {{ now()->hour < 12 ? 'morning' : (now()->hour < 18 ? 'afternoon' : 'evening') }}, {{ str($employee?->user?->name ?? auth()->user()->name)->before(' ') }}</h2><p class="page-subtitle">Your leave and performance activity at a glance.</p></div>
+            <div><div class="eyebrow">EMPLOYEE PORTAL</div><h2 class="page-title">Good {{ now()->hour < 12 ? 'morning' : (now()->hour < 18 ? 'afternoon' : 'evening') }}, {{ str($employee?->user?->name ?? auth()->user()->name)->before(' ') }}</h2><p class="page-subtitle">Your leave, performance, and assigned work at a glance.</p></div>
             <div class="page-actions"><a class="btn btn-primary" href="{{ route('employee.leave.create') }}">＋ Request leave</a></div>
         </section>
         <div class="metric-grid">
@@ -14,6 +14,8 @@
             <div class="metric-card accent-amber"><div class="metric-top"><span class="metric-label">Pending leaves</span><span class="metric-icon">…</span></div><div class="metric-value" data-dashboard-metric="pendingLeaves">{{ $pendingLeaves }}</div><div class="metric-note">Waiting for a decision</div></div>
             <div class="metric-card accent-green"><div class="metric-top"><span class="metric-label">Approved leaves</span><span class="metric-icon">✓</span></div><div class="metric-value" data-dashboard-metric="approvedLeaves">{{ $approvedLeaves }}</div><div class="metric-note">Approved requests</div></div>
             <div class="metric-card accent-rose"><div class="metric-top"><span class="metric-label">Rejected leaves</span><span class="metric-icon">–</span></div><div class="metric-value" data-dashboard-metric="rejectedLeaves">{{ $rejectedLeaves }}</div><div class="metric-note">Review your request history</div></div>
+            <a class="metric-card accent-green" href="{{ route('employee.tasks.index') }}"><div class="metric-top"><span class="metric-label">Open tasks</span><span class="metric-icon">TK</span></div><div class="metric-value" data-dashboard-metric="openTaskCount">{{ $openTaskCount }}</div><div class="metric-note">Of <span data-dashboard-metric="taskCount">{{ $taskCount }}</span> assigned tasks</div></a>
+            <a class="metric-card" href="{{ route('employee.feedback.index') }}"><div class="metric-top"><span class="metric-label">My feedback</span><span class="metric-icon">FB</span></div><div class="metric-value" data-dashboard-metric="feedbackCount">{{ $feedbackCount }}</div><div class="metric-note">Submissions to the company</div></a>
         </div>
         <div class="content-grid">
             <section class="panel">
@@ -64,6 +66,13 @@
             <div class="metric-card accent-amber"><div class="metric-top"><span class="metric-label">Pending leaves</span><span class="metric-icon">…</span></div><div class="metric-value" data-dashboard-metric="pendingLeaves">{{ $pendingLeaves }}</div><div class="metric-note">Need a decision</div></div>
             <div class="metric-card accent-green"><div class="metric-top"><span class="metric-label">Approved leaves</span><span class="metric-icon">✓</span></div><div class="metric-value" data-dashboard-metric="approvedLeaves">{{ $approvedLeaves }}</div><div class="metric-note">Approved requests</div></div>
             <div class="metric-card"><div class="metric-top"><span class="metric-label">Performance reviews</span><span class="metric-icon">PR</span></div><div class="metric-value" data-dashboard-metric="performanceRecords">{{ $performanceRecords }}</div><div class="metric-note">Recorded reviews</div></div>
+        </div>
+        <div class="metric-grid metric-4">
+            <a class="metric-card" href="{{ route('tasks.index') }}"><div class="metric-top"><span class="metric-label">Tasks</span><span class="metric-icon">TK</span></div><div class="metric-value" data-dashboard-metric="totalTasks">{{ $totalTasks }}</div><div class="metric-note">Internal work assignments</div></a>
+            <a class="metric-card accent-amber" href="{{ route('tasks.index', ['assignment' => 'unassigned']) }}"><div class="metric-top"><span class="metric-label">Unassigned tasks</span><span class="metric-icon">!</span></div><div class="metric-value" data-dashboard-metric="unassignedTasks">{{ $unassignedTasks }}</div><div class="metric-note">Awaiting an employee assignment</div></a>
+            <a class="metric-card accent-rose" href="{{ route('tasks.index', ['due' => 'overdue']) }}"><div class="metric-top"><span class="metric-label">Overdue tasks</span><span class="metric-icon">!</span></div><div class="metric-value" data-dashboard-metric="overdueTasks">{{ $overdueTasks }}</div><div class="metric-note">Due dates have passed</div></a>
+            <a class="metric-card accent-green" href="{{ route('feedback.index', ['status' => 'new']) }}"><div class="metric-top"><span class="metric-label">New feedback</span><span class="metric-icon">FB</span></div><div class="metric-value" data-dashboard-metric="newFeedback">{{ $newFeedback }}</div><div class="metric-note">Submissions to review</div></a>
+            <a class="metric-card accent-green" href="{{ route('location-events.index') }}"><div class="metric-top"><span class="metric-label">Locations recorded</span><span class="metric-icon">LC</span></div><div class="metric-value" data-dashboard-metric="locationsReceived">{{ $locationsReceived }}</div><div class="metric-note">Server-confirmed events</div></a>
         </div>
         <section class="panel">
             <div class="panel-head"><div><h2 class="panel-title">Latest leave requests</h2><div class="panel-caption">Recent employee submissions that may need attention</div></div><a class="panel-link" href="{{ route('leaves.index') }}">Manage leaves →</a></div>

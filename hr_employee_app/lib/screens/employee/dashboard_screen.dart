@@ -12,6 +12,8 @@ import 'profile_screen.dart';
 import 'attendance_screen.dart';
 import 'leaves_screen.dart';
 import '../../components/app_error.dart';
+import 'tasks_screen.dart';
+import 'feedback_screen.dart';
 
 class DashboardScreen extends StatefulWidget {
   final Map<String, dynamic> user;
@@ -269,6 +271,42 @@ class _DashboardScreenState extends State<DashboardScreen> {
                               context,
                               MaterialPageRoute(
                                 builder: (context) => const ProfileScreen(),
+                              ),
+                            );
+                          },
+                        ),
+                      ),
+                    ],
+                  ),
+
+                  const SizedBox(height: 15),
+
+                  Row(
+                    children: [
+                      Expanded(
+                        child: DashboardCard(
+                          icon: Icons.assignment_outlined,
+                          title: 'My Tasks',
+                          onTap: () {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (_) => const EmployeeTasksScreen(),
+                              ),
+                            );
+                          },
+                        ),
+                      ),
+                      const SizedBox(width: 15),
+                      Expanded(
+                        child: DashboardCard(
+                          icon: Icons.feedback_outlined,
+                          title: 'Feedback',
+                          onTap: () {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (_) => const EmployeeFeedbackScreen(),
                               ),
                             );
                           },

@@ -7,6 +7,11 @@ use App\Models\Employee;
 use App\Models\Attendance;
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\LocationEventController;
+use App\Http\Controllers\Api\EmployeeLeaveController;
+use App\Http\Controllers\TaskController;
+use App\Http\Controllers\ProjectController;
+use App\Http\Controllers\LocationEventManagementController;
+use App\Http\Controllers\FeedbackController;
 
 Route::get('/user', function (Request $request) {
     $user = $request->user();
@@ -47,7 +52,9 @@ Route::middleware(['auth:sanctum', 'role:admin'])
     Route::middleware(['auth:sanctum', 'role:admin'])
     ->get('/admin/attendance', function (Request $request) {
 
-        $attendance = Attendance::with('employee.user')
+        $attendance = Attendance::query()
+            ->select(['id', 'employee_id', 'attendance_date', 'status', 'check_in', 'check_out', 'remarks', 'sync_id', 'created_at', 'updated_at'])
+            ->with(['employee:id,user_id,employee_id', 'employee.user:id,name'])
             ->orderBy('attendance_date', 'desc')
             ->get();
 
@@ -74,23 +81,22 @@ Route::middleware(['auth:sanctum', 'role:admin'])
         \App\Models\Leave $leave
     ) {
 
-        $request->validate([
+        $validated = $request->validate([
             'status' => 'required|in:approved,rejected',
             'admin_remarks' => 'nullable|string|max:1000',
         ]);
 
-        if ($leave->status !== 'pending') {
-            return response()->json(['message' => 'This leave request has already been reviewed.'], 409);
-        }
-
-        $leave->update([
-            'status' => $request->status,
-            'admin_remarks' => $request->admin_remarks,
-        ]);
+        $updated = \Illuminate\Support\Facades\DB::transaction(function () use ($leave, $validated) {
+            $locked = \App\Models\Leave::query()->whereKey($leave->id)->lockForUpdate()->firstOrFail();
+            if ($locked->status !== 'pending') return null;
+            $locked->update($validated);
+            return $locked->fresh()->load('employee.user');
+        });
+        if (!$updated) return response()->json(['message' => 'This leave request has already been reviewed.'], 409);
 
         return response()->json([
             'message' => 'Leave status updated successfully',
-            'leave' => $leave->load('employee.user'),
+            'leave' => $updated,
         ]);
     });
 
@@ -202,6 +208,15 @@ Route::middleware(['auth:sanctum', 'role:admin'])
 
             'performance_records' =>
                 \App\Models\Performance::count(),
+            'locations_received' => \App\Models\LocationEvent::count(),
+
+            'total_tasks' => \App\Models\Task::count(),
+            'unassigned_tasks' => \App\Models\Task::doesntHave('assignments')->count(),
+            'overdue_tasks' => \App\Models\Task::whereDate('due_date', '<', today())
+                ->whereHas('assignments', fn ($query) => $query->where('status', '!=', 'completed'))
+                ->count(),
+            'new_feedback' => \App\Models\Feedback::where('status', 'new')->count(),
+            'locations_received' => \App\Models\LocationEvent::count(),
         ]);
     });
 
@@ -220,7 +235,9 @@ Route::middleware(['auth:sanctum', 'role:admin'])
     Route::middleware(['auth:sanctum', 'role:hr'])
     ->get('/hr/attendance', function (Request $request) {
 
-        $attendance = \App\Models\Attendance::with('employee.user')
+        $attendance = \App\Models\Attendance::query()
+            ->select(['id', 'employee_id', 'attendance_date', 'status', 'check_in', 'check_out', 'remarks', 'sync_id', 'created_at', 'updated_at'])
+            ->with(['employee:id,user_id,employee_id', 'employee.user:id,name'])
             ->orderBy('attendance_date', 'desc')
             ->get();
 
@@ -246,23 +263,22 @@ Route::middleware(['auth:sanctum', 'role:admin'])
         Request $request,
         \App\Models\Leave $leave
     ) {
-        $request->validate([
+        $validated = $request->validate([
             'status' => 'required|in:approved,rejected',
             'admin_remarks' => 'nullable|string|max:1000',
         ]);
 
-        if ($leave->status !== 'pending') {
-            return response()->json(['message' => 'This leave request has already been reviewed.'], 409);
-        }
-
-        $leave->update([
-            'status' => $request->status,
-            'admin_remarks' => $request->admin_remarks,
-        ]);
+        $updated = \Illuminate\Support\Facades\DB::transaction(function () use ($leave, $validated) {
+            $locked = \App\Models\Leave::query()->whereKey($leave->id)->lockForUpdate()->firstOrFail();
+            if ($locked->status !== 'pending') return null;
+            $locked->update($validated);
+            return $locked->fresh()->load('employee.user');
+        });
+        if (!$updated) return response()->json(['message' => 'This leave request has already been reviewed.'], 409);
 
         return response()->json([
             'message' => 'Leave status updated successfully',
-            'leave' => $leave->load('employee.user'),
+            'leave' => $updated,
         ]);
     });
 
@@ -364,6 +380,7 @@ Route::middleware(['auth:sanctum', 'role:employee'])->get('/employee/attendance'
     }
 
     $attendance = $employee->attendances()
+        ->select(['id', 'employee_id', 'attendance_date', 'status', 'check_in', 'check_out', 'remarks', 'sync_id', 'created_at', 'updated_at'])
         ->orderBy('attendance_date', 'desc')
         ->get();
 
@@ -516,6 +533,12 @@ Route::middleware(['auth:sanctum', 'role:admin'])
             'pending_leaves' => \App\Models\Leave::where('status', 'pending')->count(),
             'approved_leaves' => \App\Models\Leave::where('status', 'approved')->count(),
             'rejected_leaves' => \App\Models\Leave::where('status', 'rejected')->count(),
+            'total_tasks' => \App\Models\Task::count(),
+            'unassigned_tasks' => \App\Models\Task::doesntHave('assignments')->count(),
+            'overdue_tasks' => \App\Models\Task::whereDate('due_date', '<', today())
+                ->whereHas('assignments', fn ($query) => $query->where('status', '!=', 'completed'))
+                ->count(),
+            'new_feedback' => \App\Models\Feedback::where('status', 'new')->count(),
         ]);
     });
 
@@ -539,6 +562,13 @@ Route::middleware(['auth:sanctum', 'role:employee'])->group(function () {
             'leaves' => $leaves,
         ]);
     });
+
+    Route::patch('/employee/leaves/{leave}', [EmployeeLeaveController::class, 'update']);
+    Route::get('/employee/tasks', [TaskController::class, 'apiMyTasks']);
+    Route::get('/employee/tasks/{assignment}', [TaskController::class, 'apiMyTask']);
+    Route::patch('/employee/tasks/{assignment}/progress', [TaskController::class, 'apiUpdateMyProgress']);
+    Route::get('/employee/feedback', [FeedbackController::class, 'apiMine']);
+    Route::post('/employee/feedback', [FeedbackController::class, 'apiStoreMine']);
 
 });
 
@@ -624,3 +654,16 @@ Route::middleware(['auth:sanctum', 'role:employee'])->post('/employee/leaves', f
 
 Route::middleware(['auth:sanctum', 'role:employee'])
     ->post('/employee/location-events', [LocationEventController::class, 'store']);
+
+Route::middleware(['auth:sanctum', 'role:admin,hr'])->group(function () {
+    Route::get('/management/location-events', [LocationEventManagementController::class, 'apiIndex']);
+    Route::get('/management/task-options', [TaskController::class, 'apiOptions']);
+    Route::get('/management/tasks', [TaskController::class, 'apiIndex']);
+    Route::post('/management/tasks', [TaskController::class, 'apiStore']);
+    Route::patch('/management/tasks/{task}', [TaskController::class, 'apiUpdate']);
+    Route::get('/management/projects', [ProjectController::class, 'apiIndex']);
+    Route::post('/management/projects', [ProjectController::class, 'apiStore']);
+    Route::patch('/management/projects/{project}', [ProjectController::class, 'apiUpdate']);
+    Route::get('/management/feedback', [FeedbackController::class, 'apiIndex']);
+    Route::patch('/management/feedback/{feedback}', [FeedbackController::class, 'apiUpdate']);
+});

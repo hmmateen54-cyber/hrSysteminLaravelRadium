@@ -38,7 +38,7 @@ class AppTheme {
         elevation: 0,
         centerTitle: true,
         titleTextStyle: TextStyle(
-          fontFamily: 'Montserrat',
+          fontFamily: 'Roboto',
           color: primaryColor,
           fontSize: 20,
           fontWeight: FontWeight.w600,
@@ -48,47 +48,47 @@ class AppTheme {
       fontFamily: 'Roboto', // Default fallback body font
       textTheme: const TextTheme(
         displayLarge: TextStyle(
-          fontFamily: 'Montserrat',
+          fontFamily: 'Roboto',
           color: textPrimary,
           fontWeight: FontWeight.bold,
         ),
         displayMedium: TextStyle(
-          fontFamily: 'Montserrat',
+          fontFamily: 'Roboto',
           color: textPrimary,
           fontWeight: FontWeight.bold,
         ),
         displaySmall: TextStyle(
-          fontFamily: 'Montserrat',
+          fontFamily: 'Roboto',
           color: textPrimary,
           fontWeight: FontWeight.bold,
         ),
         headlineLarge: TextStyle(
-          fontFamily: 'Montserrat',
+          fontFamily: 'Roboto',
           color: textPrimary,
           fontWeight: FontWeight.w600,
         ),
         headlineMedium: TextStyle(
-          fontFamily: 'Montserrat',
+          fontFamily: 'Roboto',
           color: textPrimary,
           fontWeight: FontWeight.w600,
         ),
         headlineSmall: TextStyle(
-          fontFamily: 'Montserrat',
+          fontFamily: 'Roboto',
           color: textPrimary,
           fontWeight: FontWeight.w600,
         ),
         titleLarge: TextStyle(
-          fontFamily: 'Montserrat',
+          fontFamily: 'Roboto',
           color: textPrimary,
           fontWeight: FontWeight.w600,
         ),
         titleMedium: TextStyle(
-          fontFamily: 'Montserrat',
+          fontFamily: 'Roboto',
           color: textPrimary,
           fontWeight: FontWeight.w600,
         ),
         titleSmall: TextStyle(
-          fontFamily: 'Montserrat',
+          fontFamily: 'Roboto',
           color: textPrimary,
           fontWeight: FontWeight.w600,
         ),
@@ -183,7 +183,7 @@ class AppTheme {
         backgroundColor: white,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         titleTextStyle: const TextStyle(
-          fontFamily: 'Montserrat',
+          fontFamily: 'Roboto',
           fontSize: 20,
           fontWeight: FontWeight.w600,
           color: textPrimary,

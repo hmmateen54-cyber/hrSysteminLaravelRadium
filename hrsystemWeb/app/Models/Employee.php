@@ -66,6 +66,11 @@ class Employee extends Model
         return $this->hasMany(Salary::class);
     }
 
+    public function taskAssignments()
+    {
+        return $this->hasMany(TaskAssignment::class);
+    }
+
     /** @return list<string> */
     public function missingProfileCompletionFields(): array
     {

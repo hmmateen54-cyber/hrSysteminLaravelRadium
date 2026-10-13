@@ -3,12 +3,14 @@ import 'package:flutter/material.dart';
 import '../../components/app_button.dart';
 import '../../components/app_text_field.dart';
 import '../../components/logout_action.dart';
+import '../../services/api_service.dart';
 import '../../services/offline_sync_service.dart';
 
 class ApplyLeaveScreen extends StatefulWidget {
   final String? queueId;
+  final Map<String, dynamic>? existingLeave;
 
-  const ApplyLeaveScreen({super.key, this.queueId});
+  const ApplyLeaveScreen({super.key, this.queueId, this.existingLeave});
 
   @override
   State<ApplyLeaveScreen> createState() => _ApplyLeaveScreenState();
@@ -21,6 +23,7 @@ class _ApplyLeaveScreenState extends State<ApplyLeaveScreen> {
 
   String leaveType = 'Casual';
   String? queueId;
+  int? serverLeaveId;
   String? loadError;
   bool loading = false;
 
@@ -28,7 +31,14 @@ class _ApplyLeaveScreenState extends State<ApplyLeaveScreen> {
   void initState() {
     super.initState();
     queueId = widget.queueId;
-    if (queueId != null) {
+    final existingLeave = widget.existingLeave;
+    if (existingLeave != null) {
+      serverLeaveId = int.tryParse(existingLeave['id']?.toString() ?? '');
+      startDateController.text = existingLeave['start_date']?.toString() ?? '';
+      endDateController.text = existingLeave['end_date']?.toString() ?? '';
+      reasonController.text = existingLeave['reason']?.toString() ?? '';
+      leaveType = existingLeave['leave_type']?.toString() ?? leaveType;
+    } else if (queueId != null) {
       _loadQueuedRequest();
     }
   }
@@ -97,6 +107,32 @@ class _ApplyLeaveScreenState extends State<ApplyLeaveScreen> {
 
     setState(() => loading = true);
     try {
+      if (serverLeaveId != null) {
+        final response =
+            await ApiService.patch('/employee/leaves/$serverLeaveId', {
+              'start_date': startDateController.text.trim(),
+              'end_date': endDateController.text.trim(),
+              'leave_type': leaveType,
+              'reason': reasonController.text,
+            });
+        if (!mounted) return;
+        if (!ApiService.isSuccess(response['status'])) {
+          final message = ApiService.messageFromResponse(
+            response['data'],
+            response['status'],
+          );
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(SnackBar(content: Text(message)));
+          return;
+        }
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Pending leave request updated.')),
+        );
+        Navigator.pop(context, true);
+        return;
+      }
+
       queueId = await OfflineSyncService.queueLeaveRequest(
         startDate: startDateController.text.trim(),
         endDate: endDateController.text.trim(),
@@ -159,7 +195,13 @@ class _ApplyLeaveScreenState extends State<ApplyLeaveScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text(queueId == null ? 'Apply Leave' : 'Edit Saved Leave'),
+        title: Text(
+          serverLeaveId != null
+              ? 'Edit Pending Leave'
+              : queueId == null
+              ? 'Apply Leave'
+              : 'Edit Saved Leave',
+        ),
         actions: const [LogoutAction()],
       ),
       body: SingleChildScrollView(
@@ -220,7 +262,11 @@ class _ApplyLeaveScreenState extends State<ApplyLeaveScreen> {
             ),
             const SizedBox(height: 24),
             AppButton(
-              text: queueId == null ? 'Submit Leave' : 'Save and Retry',
+              text: serverLeaveId != null
+                  ? 'Save Changes'
+                  : queueId == null
+                  ? 'Submit Leave'
+                  : 'Save and Retry',
               loading: loading,
               onPressed: submitLeave,
             ),

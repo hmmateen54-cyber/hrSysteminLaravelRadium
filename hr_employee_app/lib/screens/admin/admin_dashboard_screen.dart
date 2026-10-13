@@ -11,6 +11,9 @@ import '../../components/app_loader.dart';
 import '../../components/app_error.dart';
 import 'admin_attendance_screen.dart';
 import 'admin_performance_screen.dart';
+import '../hr/management_tasks_screen.dart';
+import '../hr/management_feedback_screen.dart';
+import '../hr/management_locations_screen.dart';
 
 class AdminDashboardScreen extends StatefulWidget {
   const AdminDashboardScreen({super.key});
@@ -30,6 +33,11 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   int pendingLeaves = 0;
   int approvedLeaves = 0;
   int rejectedLeaves = 0;
+  int totalTasks = 0;
+  int unassignedTasks = 0;
+  int overdueTasks = 0;
+  int newFeedback = 0;
+  int locationsReceived = 0;
 
   bool loading = true;
   String? error;
@@ -67,6 +75,11 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
           pendingLeaves = _count(data['pending_leaves']);
           approvedLeaves = _count(data['approved_leaves']);
           rejectedLeaves = _count(data['rejected_leaves']);
+          totalTasks = _count(data['total_tasks']);
+          unassignedTasks = _count(data['unassigned_tasks']);
+          overdueTasks = _count(data['overdue_tasks']);
+          newFeedback = _count(data['new_feedback']);
+          locationsReceived = _count(data['locations_received']);
           loading = false;
           error = null;
           _hasData = true;
@@ -193,6 +206,46 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                       DashboardCard(
                         icon: Icons.admin_panel_settings,
                         title: 'HR\n$totalHr',
+                      ),
+                      DashboardCard(
+                        icon: Icons.assignment_outlined,
+                        title:
+                            'Projects & Tasks\n$totalTasks\n$unassignedTasks unassigned · $overdueTasks overdue',
+                        onTap: () async {
+                          await Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => const ManagementTasksScreen(),
+                            ),
+                          );
+                          await getDashboardData();
+                        },
+                      ),
+                      DashboardCard(
+                        icon: Icons.feedback_outlined,
+                        title: 'New Feedback\n$newFeedback',
+                        onTap: () async {
+                          await Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => const ManagementFeedbackScreen(),
+                            ),
+                          );
+                          await getDashboardData();
+                        },
+                      ),
+                      DashboardCard(
+                        icon: Icons.location_on_outlined,
+                        title: 'Locations\n$locationsReceived recorded',
+                        onTap: () async {
+                          await Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => const ManagementLocationsScreen(),
+                            ),
+                          );
+                          await getDashboardData();
+                        },
                       ),
                     ],
                   ),

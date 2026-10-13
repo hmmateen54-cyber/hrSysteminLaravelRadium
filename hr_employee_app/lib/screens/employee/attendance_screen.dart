@@ -5,6 +5,7 @@ import 'package:geolocator/geolocator.dart';
 
 import '../../components/app_loader.dart';
 import '../../components/logout_action.dart';
+import '../../components/offline_cache_banner.dart';
 import '../../services/api_service.dart';
 import '../../services/auto_refresh_controller.dart';
 import '../../services/offline_sync_service.dart';
@@ -28,13 +29,16 @@ class _AttendanceScreenState extends State<AttendanceScreen>
   bool loading = true;
   bool checkingIn = false;
   String? error;
+  String? _cacheFetchedAt;
+  bool _hasCachedData = false;
+  bool _offlineMode = false;
   String locationMessage = 'Location has not been requested.';
   _LocationState locationState = _LocationState.neutral;
   String? locationQueueId;
 
   Color get _locationColor => switch (locationState) {
-    _LocationState.available || _LocationState.uploaded => Colors.green,
-    _LocationState.waiting => Colors.blue,
+    _LocationState.uploaded => Colors.green,
+    _LocationState.available || _LocationState.waiting => Colors.amber.shade800,
     _LocationState.error => Colors.red,
     _ => Colors.blueGrey,
   };
@@ -55,6 +59,7 @@ class _AttendanceScreenState extends State<AttendanceScreen>
       ..start();
     OfflineSyncService.queueRevision.addListener(_onQueueChanged);
     getAttendance();
+    _refreshLocationStatus();
   }
 
   void _onQueueChanged() => unawaited(getAttendance());
@@ -69,28 +74,32 @@ class _AttendanceScreenState extends State<AttendanceScreen>
   }
 
   Future<void> _refreshLocationStatus() async {
-    final id = locationQueueId;
-    if (id == null) return;
-
     try {
       final rows = await OfflineSyncService.getQueueItems(
         operation: 'location',
       );
-      final matches = rows.where((row) => row['queue_id'] == id);
-
-      if (matches.isEmpty || !mounted) return;
-
-      final item = matches.first;
+      if (rows.isEmpty || !mounted) return;
+      final item = rows.firstWhere(
+        (row) => row['queue_id'] == locationQueueId,
+        orElse: () => rows.first,
+      );
+      locationQueueId = item['queue_id']?.toString();
       final status = item['sync_status'];
 
       setState(() {
         if (status == 'synced') {
           locationState = _LocationState.uploaded;
-          locationMessage = 'Location uploaded to the server.';
+          final syncedAt = DateTime.tryParse(
+            item['synced_at']?.toString() ?? '',
+          );
+          locationMessage = syncedAt == null
+              ? 'Location confirmed by the server.'
+              : 'Location confirmed by the server at ${syncedAt.toLocal()}.';
         } else if (status == 'failed') {
-          locationState = _LocationState.error;
+          locationState = _LocationState.waiting;
           locationMessage =
-              item['last_error']?.toString() ?? 'Location upload failed.';
+              'Location needs attention: '
+              '${item['last_error']?.toString() ?? 'sync failed'}';
         } else {
           locationState = _LocationState.waiting;
           locationMessage = 'Location saved offline — waiting to sync.';
@@ -124,6 +133,28 @@ class _AttendanceScreenState extends State<AttendanceScreen>
       }
     }
 
+    Map<String, dynamic>? cached;
+    try {
+      cached = await OfflineSyncService.readCachedItems('attendance');
+    } catch (_) {
+      localStorageError ??= 'Offline attendance history is unavailable.';
+    }
+    final cachedRemote =
+        (cached?['items'] as List?)
+            ?.whereType<Map>()
+            .map((row) => Map<String, dynamic>.from(row))
+            .toList() ??
+        <Map<String, dynamic>>[];
+    if (cached != null && mounted) {
+      setState(() {
+        attendance = _mergeAttendance(local, cachedRemote);
+        _cacheFetchedAt = cached?['fetched_at']?.toString();
+        _hasCachedData = true;
+        loading = false;
+        _hasLoaded = true;
+      });
+    }
+
     try {
       final response = await ApiService.get('/employee/attendance');
 
@@ -139,12 +170,24 @@ class _AttendanceScreenState extends State<AttendanceScreen>
                   .toList()
             : <Map<String, dynamic>>[];
 
+        try {
+          await OfflineSyncService.saveCachedItems('attendance', remote);
+          final savedCache = await OfflineSyncService.readCachedItems(
+            'attendance',
+          );
+          _cacheFetchedAt = savedCache?['fetched_at']?.toString();
+          _hasCachedData = true;
+        } catch (_) {
+          // Keep the live response usable if local caching fails.
+        }
+
         final merged = _mergeAttendance(local, remote);
 
         setState(() {
           attendance = merged;
           loading = false;
           error = localStorageError;
+          _offlineMode = false;
           _hasLoaded = true;
         });
       } else {
@@ -161,6 +204,10 @@ class _AttendanceScreenState extends State<AttendanceScreen>
                   ? data['message']?.toString() ??
                         ApiService.messageForStatus(response['status'])
                   : ApiService.messageForStatus(response['status']));
+          _offlineMode =
+              _hasCachedData &&
+              (response['status'] == 429 ||
+                  (response['status'] is int && response['status'] >= 500));
           loading = false;
           _hasLoaded = true;
         });
@@ -176,6 +223,7 @@ class _AttendanceScreenState extends State<AttendanceScreen>
         error =
             localStorageError ??
             'Unable to reach the server. Saved attendance remains on this device.';
+        _offlineMode = _hasCachedData;
         loading = false;
         _hasLoaded = true;
       });
@@ -448,6 +496,14 @@ class _AttendanceScreenState extends State<AttendanceScreen>
                       ),
                     ],
                   ),
+                if (_offlineMode)
+                  OfflineCacheBanner(
+                    fetchedAt: _cacheFetchedAt,
+                    onRetry: () async {
+                      await OfflineSyncService.syncPendingLeaves(force: true);
+                      await getAttendance();
+                    },
+                  ),
                 Card(
                   margin: const EdgeInsets.fromLTRB(16, 16, 16, 8),
                   child: Padding(
@@ -482,6 +538,19 @@ class _AttendanceScreenState extends State<AttendanceScreen>
                               : const Icon(Icons.my_location),
                           label: const Text('Share Location'),
                         ),
+                        if (locationState == _LocationState.waiting) ...[
+                          const SizedBox(height: 4),
+                          TextButton.icon(
+                            onPressed: () async {
+                              await OfflineSyncService.syncPendingLeaves(
+                                force: true,
+                              );
+                              await _refreshLocationStatus();
+                            },
+                            icon: const Icon(Icons.sync),
+                            label: const Text('Retry location sync'),
+                          ),
+                        ],
                       ],
                     ),
                   ),
@@ -491,9 +560,14 @@ class _AttendanceScreenState extends State<AttendanceScreen>
                       ? RefreshIndicator(
                           onRefresh: getAttendance,
                           child: ListView(
-                            children: const [
-                              SizedBox(height: 150),
-                              Center(
+                            children: [
+                              if (_offlineMode)
+                                OfflineCacheBanner(
+                                  fetchedAt: _cacheFetchedAt,
+                                  onRetry: getAttendance,
+                                ),
+                              const SizedBox(height: 150),
+                              const Center(
                                 child: Text('No attendance records found'),
                               ),
                             ],

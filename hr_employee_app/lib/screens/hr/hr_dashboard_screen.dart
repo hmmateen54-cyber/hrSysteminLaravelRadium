@@ -12,6 +12,9 @@ import 'hr_attendance_screen.dart';
 import 'hr_employees_screen.dart';
 import 'hr_leaves_screen.dart';
 import 'hr_performance_screen.dart';
+import 'management_tasks_screen.dart';
+import 'management_feedback_screen.dart';
+import 'management_locations_screen.dart';
 
 class HRDashboardScreen extends StatefulWidget {
   const HRDashboardScreen({super.key});
@@ -157,6 +160,24 @@ class _HRDashboardScreenState extends State<HRDashboardScreen> {
                         title:
                             'Performance\n${dashboard['performance_records'] ?? 0}',
                         onTap: () => _open(const HRPerformanceScreen()),
+                      ),
+                      DashboardCard(
+                        icon: Icons.assignment_outlined,
+                        title:
+                            'Projects & Tasks\n${dashboard['total_tasks'] ?? 0}\n${dashboard['unassigned_tasks'] ?? 0} unassigned',
+                        onTap: () => _open(const ManagementTasksScreen()),
+                      ),
+                      DashboardCard(
+                        icon: Icons.feedback_outlined,
+                        title:
+                            'New Feedback\n${dashboard['new_feedback'] ?? 0}',
+                        onTap: () => _open(const ManagementFeedbackScreen()),
+                      ),
+                      DashboardCard(
+                        icon: Icons.location_on_outlined,
+                        title:
+                            'Locations\n${dashboard['locations_received'] ?? 0} recorded',
+                        onTap: () => _open(const ManagementLocationsScreen()),
                       ),
                     ],
                   ),
