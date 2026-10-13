@@ -1,5 +1,9 @@
 import 'package:flutter/material.dart';
 
+import '../theme/app_colors.dart';
+import '../theme/app_radius.dart';
+import '../theme/app_spacing.dart';
+
 class OfflineCacheBanner extends StatelessWidget {
   final String? fetchedAt;
   final VoidCallback onRetry;
@@ -24,10 +28,47 @@ class OfflineCacheBanner extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialBanner(
-      content: Text('Offline — showing saved data. ${_formatTime()}'),
-      leading: const Icon(Icons.cloud_off_outlined),
-      actions: [TextButton(onPressed: onRetry, child: const Text('Retry'))],
+    return Container(
+      margin: const EdgeInsets.only(bottom: AppSpacing.md),
+      padding: const EdgeInsets.all(AppSpacing.md),
+      decoration: BoxDecoration(
+        color: AppColors.warningSurface,
+        borderRadius: BorderRadius.circular(AppRadius.medium),
+        border: Border.all(color: AppColors.warning.withValues(alpha: 0.16)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Icon(Icons.cloud_off_outlined, color: AppColors.warning),
+          const SizedBox(width: AppSpacing.sm),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Offline · saved information',
+                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                    color: AppColors.textPrimary,
+                  ),
+                ),
+                const SizedBox(height: AppSpacing.xxs),
+                Text(
+                  _formatTime(),
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: AppColors.textSecondary,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: AppSpacing.xs),
+          TextButton.icon(
+            onPressed: onRetry,
+            icon: const Icon(Icons.refresh_rounded, size: 17),
+            label: const Text('Retry'),
+          ),
+        ],
+      ),
     );
   }
 }

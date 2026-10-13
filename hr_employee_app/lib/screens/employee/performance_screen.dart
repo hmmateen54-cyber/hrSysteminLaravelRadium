@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import '../../components/logout_action.dart';
 import '../../components/app_error.dart';
 import '../../components/app_loader.dart';
+import '../../components/app_empty_state.dart';
+import '../../components/app_section_header.dart';
 import '../../components/offline_cache_banner.dart';
 import '../../services/api_service.dart';
 import '../../services/auto_refresh_controller.dart';
@@ -132,38 +134,102 @@ class _PerformanceScreenState extends State<PerformanceScreen> {
           : RefreshIndicator(
               onRefresh: getPerformance,
               child: ListView(
-                padding: const EdgeInsets.all(16),
+                padding: const EdgeInsets.fromLTRB(20, 8, 20, 28),
                 children: [
+                  const AppSectionHeader(
+                    title: 'Performance history',
+                    subtitle: 'Reviews and feedback shared with your account',
+                  ),
                   if (_offlineMode)
                     OfflineCacheBanner(
                       fetchedAt: _cacheFetchedAt,
                       onRetry: getPerformance,
                     ),
                   if (performance.isEmpty)
-                    const Padding(
-                      padding: EdgeInsets.only(top: 130),
-                      child: Center(
-                        child: Text('No performance records found'),
-                      ),
+                    const AppEmptyState(
+                      icon: Icons.insights_outlined,
+                      title: 'No reviews available',
+                      description:
+                          'Performance reviews will appear here when they are shared with you.',
                     ),
                   ...List.generate(performance.length, (index) {
                     final record = performance[index];
-
+                    final rating = record['rating']?.toString();
+                    final comments = record['comments']?.toString().trim();
                     return Card(
                       margin: const EdgeInsets.only(bottom: 12),
-                      child: ListTile(
-                        leading: const CircleAvatar(
-                          child: Icon(Icons.assessment),
-                        ),
-
-                        title: Text(
-                          'Rating: ${record['rating']}/5',
-                          style: const TextStyle(fontWeight: FontWeight.bold),
-                        ),
-
-                        subtitle: Text(
-                          'Review Date: ${record['review_date']}\n'
-                          '${record['comments'] ?? 'No comments'}',
+                      child: Padding(
+                        padding: const EdgeInsets.all(18),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                Container(
+                                  width: 40,
+                                  height: 40,
+                                  decoration: BoxDecoration(
+                                    color: Theme.of(context).colorScheme.primary
+                                        .withValues(alpha: 0.07),
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                  child: Icon(
+                                    Icons.insights_outlined,
+                                    color: Theme.of(
+                                      context,
+                                    ).colorScheme.primary,
+                                  ),
+                                ),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        'Performance review',
+                                        style: Theme.of(
+                                          context,
+                                        ).textTheme.titleSmall,
+                                      ),
+                                      const SizedBox(height: 3),
+                                      Text(
+                                        record['review_date']?.toString() ??
+                                            'Date unavailable',
+                                        style: Theme.of(
+                                          context,
+                                        ).textTheme.bodySmall,
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                if (rating != null)
+                                  Text(
+                                    '$rating / 5',
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .titleMedium
+                                        ?.copyWith(
+                                          color: Theme.of(
+                                            context,
+                                          ).colorScheme.primary,
+                                          fontFeatures: const [
+                                            FontFeature.tabularFigures(),
+                                          ],
+                                        ),
+                                  ),
+                              ],
+                            ),
+                            if (comments != null && comments.isNotEmpty) ...[
+                              const SizedBox(height: 16),
+                              const Divider(height: 1),
+                              const SizedBox(height: 14),
+                              Text(
+                                comments,
+                                style: Theme.of(context).textTheme.bodyMedium,
+                              ),
+                            ],
+                          ],
                         ),
                       ),
                     );

@@ -5,6 +5,7 @@ import '../../services/api_service.dart';
 import '../../services/auto_refresh_controller.dart';
 import '../../components/app_loader.dart';
 import '../../components/app_error.dart';
+import '../../theme/app_colors.dart';
 
 class AdminLeavesScreen extends StatefulWidget {
   const AdminLeavesScreen({super.key});
@@ -47,6 +48,11 @@ class _AdminLeavesScreenState extends State<AdminLeavesScreen> {
               onPressed: () {
                 Navigator.pop(context, remarksController.text);
               },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: status == 'approved'
+                    ? Theme.of(context).colorScheme.secondary
+                    : Theme.of(context).colorScheme.error,
+              ),
               child: Text(status == 'approved' ? 'Approve' : 'Reject'),
             ),
           ],
@@ -178,11 +184,11 @@ class _AdminLeavesScreenState extends State<AdminLeavesScreen> {
   Color getStatusColor(String status) {
     switch (status.toLowerCase()) {
       case 'approved':
-        return Colors.green;
+        return AppColors.success;
       case 'rejected':
-        return Colors.red;
+        return AppColors.error;
       default:
-        return Colors.orange;
+        return AppColors.warning;
     }
   }
 

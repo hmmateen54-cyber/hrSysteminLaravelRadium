@@ -1,5 +1,4 @@
 import 'dart:async';
-
 import 'admin_leaves_screen.dart';
 import 'admin_employees_screen.dart';
 import 'package:flutter/material.dart';
@@ -9,6 +8,7 @@ import '../../services/api_service.dart';
 import '../../services/auto_refresh_controller.dart';
 import '../../components/app_loader.dart';
 import '../../components/app_error.dart';
+import '../../components/app_section_header.dart';
 import 'admin_attendance_screen.dart';
 import 'admin_performance_screen.dart';
 import '../hr/management_tasks_screen.dart';
@@ -132,123 +132,146 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
           ? AppError(message: error!, onRetry: getDashboardData)
           : Center(
               child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: RefreshIndicator(
-                  onRefresh: getDashboardData,
-                  child: GridView.count(
-                    crossAxisCount: 2,
-                    crossAxisSpacing: 16,
-                    mainAxisSpacing: 16,
-                    children: [
-                      DashboardCard(
-                        icon: Icons.people,
-                        title: 'Users\n$totalUsers',
-                      ),
+                padding: const EdgeInsets.fromLTRB(20, 8, 20, 20),
+                child: Column(
+                  children: [
+                    const AppSectionHeader(
+                      title: 'System overview',
+                      subtitle: 'Live people, requests, and operations',
+                    ),
+                    Expanded(
+                      child: RefreshIndicator(
+                        onRefresh: getDashboardData,
+                        child: GridView.count(
+                          crossAxisCount:
+                              MediaQuery.sizeOf(context).width >= 900
+                              ? 3
+                              : MediaQuery.sizeOf(context).width < 360
+                              ? 1
+                              : 2,
+                          crossAxisSpacing: 12,
+                          mainAxisSpacing: 12,
+                          childAspectRatio:
+                              MediaQuery.sizeOf(context).width >= 900
+                              ? 1.5
+                              : 1.2,
+                          children: [
+                            DashboardCard(
+                              icon: Icons.people,
+                              title: 'Users\n$totalUsers',
+                            ),
 
-                      DashboardCard(
-                        icon: Icons.event_note,
-                        title:
-                            'Leaves\nPending $pendingLeaves\nApproved $approvedLeaves\nRejected $rejectedLeaves',
-                        onTap: () async {
-                          await Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (context) => const AdminLeavesScreen(),
+                            DashboardCard(
+                              icon: Icons.event_note,
+                              title:
+                                  'Leaves\nPending $pendingLeaves\nApproved $approvedLeaves\nRejected $rejectedLeaves',
+                              onTap: () async {
+                                await Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (context) =>
+                                        const AdminLeavesScreen(),
+                                  ),
+                                );
+                                await getDashboardData();
+                              },
                             ),
-                          );
-                          await getDashboardData();
-                        },
-                      ),
-                      DashboardCard(
-                        icon: Icons.assessment,
-                        title: 'Performance',
-                        onTap: () async {
-                          await Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (context) =>
-                                  const AdminPerformanceScreen(),
+                            DashboardCard(
+                              icon: Icons.assessment,
+                              title: 'Performance',
+                              onTap: () async {
+                                await Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (context) =>
+                                        const AdminPerformanceScreen(),
+                                  ),
+                                );
+                                await getDashboardData();
+                              },
                             ),
-                          );
-                          await getDashboardData();
-                        },
-                      ),
 
-                      DashboardCard(
-                        icon: Icons.access_time,
-                        title: 'Attendance',
-                        onTap: () async {
-                          await Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (context) =>
-                                  const AdminAttendanceScreen(),
+                            DashboardCard(
+                              icon: Icons.access_time,
+                              title: 'Attendance',
+                              onTap: () async {
+                                await Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (context) =>
+                                        const AdminAttendanceScreen(),
+                                  ),
+                                );
+                                await getDashboardData();
+                              },
                             ),
-                          );
-                          await getDashboardData();
-                        },
-                      ),
-                      DashboardCard(
-                        icon: Icons.badge,
-                        title: 'Employees\n$totalEmployees',
-                        onTap: () async {
-                          await Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (context) =>
-                                  const AdminEmployeesScreen(),
+                            DashboardCard(
+                              icon: Icons.badge,
+                              title: 'Employees\n$totalEmployees',
+                              onTap: () async {
+                                await Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (context) =>
+                                        const AdminEmployeesScreen(),
+                                  ),
+                                );
+                                await getDashboardData();
+                              },
                             ),
-                          );
-                          await getDashboardData();
-                        },
-                      ),
 
-                      DashboardCard(
-                        icon: Icons.admin_panel_settings,
-                        title: 'HR\n$totalHr',
-                      ),
-                      DashboardCard(
-                        icon: Icons.assignment_outlined,
-                        title:
-                            'Projects & Tasks\n$totalTasks\n$unassignedTasks unassigned · $overdueTasks overdue',
-                        onTap: () async {
-                          await Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (_) => const ManagementTasksScreen(),
+                            DashboardCard(
+                              icon: Icons.admin_panel_settings,
+                              title: 'HR\n$totalHr',
                             ),
-                          );
-                          await getDashboardData();
-                        },
-                      ),
-                      DashboardCard(
-                        icon: Icons.feedback_outlined,
-                        title: 'New Feedback\n$newFeedback',
-                        onTap: () async {
-                          await Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (_) => const ManagementFeedbackScreen(),
+                            DashboardCard(
+                              icon: Icons.assignment_outlined,
+                              title:
+                                  'Projects & Tasks\n$totalTasks\n$unassignedTasks unassigned · $overdueTasks overdue',
+                              onTap: () async {
+                                await Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (_) =>
+                                        const ManagementTasksScreen(),
+                                  ),
+                                );
+                                await getDashboardData();
+                              },
                             ),
-                          );
-                          await getDashboardData();
-                        },
-                      ),
-                      DashboardCard(
-                        icon: Icons.location_on_outlined,
-                        title: 'Locations\n$locationsReceived recorded',
-                        onTap: () async {
-                          await Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (_) => const ManagementLocationsScreen(),
+                            DashboardCard(
+                              icon: Icons.feedback_outlined,
+                              title: 'New Feedback\n$newFeedback',
+                              onTap: () async {
+                                await Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (_) =>
+                                        const ManagementFeedbackScreen(),
+                                  ),
+                                );
+                                await getDashboardData();
+                              },
                             ),
-                          );
-                          await getDashboardData();
-                        },
+                            DashboardCard(
+                              icon: Icons.location_on_outlined,
+                              title: 'Locations\n$locationsReceived recorded',
+                              onTap: () async {
+                                await Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (_) =>
+                                        const ManagementLocationsScreen(),
+                                  ),
+                                );
+                                await getDashboardData();
+                              },
+                            ),
+                          ],
+                        ),
                       ),
-                    ],
-                  ),
+                    ),
+                  ],
                 ),
               ),
             ),

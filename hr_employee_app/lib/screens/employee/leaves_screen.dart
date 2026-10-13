@@ -6,9 +6,16 @@ import '../../components/app_error.dart';
 import '../../components/app_loader.dart';
 import '../../components/logout_action.dart';
 import '../../components/offline_cache_banner.dart';
+import '../../components/app_status_badge.dart';
+import '../../components/app_sync_indicator.dart';
+import '../../components/app_section_header.dart';
+import '../../components/app_empty_state.dart';
 import '../../services/api_service.dart';
 import '../../services/auto_refresh_controller.dart';
 import '../../services/offline_sync_service.dart';
+import '../../theme/app_colors.dart';
+import '../../theme/app_radius.dart';
+import '../../theme/app_spacing.dart';
 import 'apply_leave_screen.dart';
 
 class LeavesScreen extends StatefulWidget {
@@ -246,7 +253,14 @@ class _LeavesScreenState extends State<LeavesScreen> {
     return Scaffold(
       appBar: AppBar(
         title: const Text('My Leaves'),
-        actions: const [LogoutAction()],
+        actions: [
+          IconButton(
+            tooltip: 'Refresh leave requests',
+            onPressed: getLeaves,
+            icon: const Icon(Icons.refresh_rounded),
+          ),
+          const LogoutAction(),
+        ],
       ),
       body: loading
           ? const AppLoader()
@@ -257,167 +271,188 @@ class _LeavesScreenState extends State<LeavesScreen> {
                 await OfflineSyncService.syncPendingLeaves(force: true);
                 await getLeaves();
               },
-              child: leaves.isEmpty
-                  ? ListView(
-                      children: [
-                        if (_offlineMode)
-                          OfflineCacheBanner(
-                            fetchedAt: _cacheFetchedAt,
-                            onRetry: getLeaves,
-                          ),
-                        const SizedBox(height: 150),
-                        const Center(child: Text('No leave requests found')),
-                      ],
-                    )
-                  : ListView.builder(
-                      padding: const EdgeInsets.all(16),
-                      itemCount:
-                          leaves.length +
-                          ((_offlineMode || error != null) ? 1 : 0),
-                      itemBuilder: (context, index) {
-                        if ((_offlineMode || error != null) && index == 0) {
-                          if (_offlineMode) {
-                            return OfflineCacheBanner(
-                              fetchedAt: _cacheFetchedAt,
-                              onRetry: () async {
-                                await OfflineSyncService.syncPendingLeaves(
-                                  force: true,
-                                );
-                                await getLeaves();
-                              },
-                            );
-                          }
-                          return Card(
-                            color: Colors.orange.shade50,
-                            child: ListTile(
-                              leading: const Icon(Icons.cloud_off),
-                              title: Text(error!),
-                              trailing: IconButton(
-                                tooltip: 'Retry sync',
-                                onPressed: () async {
-                                  await OfflineSyncService.syncPendingLeaves(
-                                    force: true,
-                                  );
-                                  await getLeaves();
-                                },
-                                icon: const Icon(Icons.refresh),
-                              ),
-                            ),
-                          );
-                        }
-
-                        final leave =
-                            leaves[index -
-                                ((_offlineMode || error != null) ? 1 : 0)];
-                        final local = leave.containsKey('sync_status');
-                        final status = local
-                            ? _localStatus(leave)
-                            : (leave['status'] ?? 'pending').toString();
-                        final color = local
-                            ? (leave['sync_status'] == 'failed'
-                                  ? Colors.red
-                                  : leave['sync_status'] == 'synced'
-                                  ? Colors.green
-                                  : Colors.blue)
-                            : status == 'approved'
-                            ? Colors.green
-                            : status == 'rejected'
-                            ? Colors.red
-                            : Colors.orange;
-                        final queueId = leave['queue_id']?.toString();
-
-                        return Card(
-                          margin: const EdgeInsets.only(bottom: 12),
-                          child: ListTile(
-                            leading: CircleAvatar(
-                              backgroundColor: color.withValues(alpha: .12),
-                              child: Icon(
-                                local
-                                    ? Icons.cloud_upload_outlined
-                                    : Icons.event_note,
-                                color: color,
-                              ),
-                            ),
-                            title: Text(
-                              leave['leave_type']?.toString() ??
-                                  'Leave request',
-                              style: const TextStyle(
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                            subtitle: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  '${leave['start_date']} → ${leave['end_date']}\n'
-                                  '${leave['reason'] ?? 'No reason'}',
-                                ),
-                                if (local) ...[
-                                  const SizedBox(height: 4),
-                                  Text(
-                                    leave['sync_status'] == 'synced'
-                                        ? 'Server confirmed; waiting for the leave list to refresh.'
-                                        : 'Saved on this device. It has not reached the server yet.',
-                                    style: TextStyle(
-                                      color: color,
-                                      fontWeight: FontWeight.w600,
-                                    ),
-                                  ),
-                                  if (leave['last_error'] != null)
-                                    Text(
-                                      leave['last_error'].toString(),
-                                      style: const TextStyle(color: Colors.red),
-                                    ),
-                                  if (queueId != null &&
-                                      leave['sync_status'] == 'failed')
-                                    TextButton.icon(
-                                      onPressed: () => _edit(leave),
-                                      icon: const Icon(Icons.edit),
-                                      label: const Text('Edit request'),
-                                    )
-                                  else if (queueId != null &&
-                                      leave['sync_status'] != 'synced')
-                                    TextButton.icon(
-                                      onPressed: _retrying.contains(queueId)
-                                          ? null
-                                          : () => _retry(leave),
-                                      icon: const Icon(Icons.sync),
-                                      label: Text(
-                                        _retrying.contains(queueId)
-                                            ? 'Syncing…'
-                                            : 'Retry sync',
-                                      ),
-                                    ),
-                                ],
-                              ],
-                            ),
-                            isThreeLine: true,
-                            trailing: Column(
-                              mainAxisSize: MainAxisSize.min,
-                              crossAxisAlignment: CrossAxisAlignment.end,
-                              children: [
-                                Text(
-                                  status.toUpperCase(),
-                                  style: TextStyle(
-                                    fontWeight: FontWeight.bold,
-                                    color: color,
-                                  ),
-                                ),
-                                if (!local && status == 'pending')
-                                  TextButton(
-                                    onPressed: () => _editServerLeave(leave),
-                                    child: const Text('Edit'),
-                                  ),
-                              ],
-                            ),
-                          ),
-                        );
+              child: ListView(
+                padding: const EdgeInsets.fromLTRB(20, 8, 20, 100),
+                children: [
+                  const AppSectionHeader(
+                    title: 'Leave requests',
+                    subtitle: 'Track submissions and review decisions',
+                  ),
+                  if (_offlineMode)
+                    OfflineCacheBanner(
+                      fetchedAt: _cacheFetchedAt,
+                      onRetry: () async {
+                        await OfflineSyncService.syncPendingLeaves(force: true);
+                        await getLeaves();
                       },
+                    )
+                  else if (error != null)
+                    _warningMessage(error!, getLeaves),
+                  if (leaves.isEmpty)
+                    const AppEmptyState(
+                      icon: Icons.event_note_outlined,
+                      title: 'No leave requests yet',
+                      description:
+                          'Your saved and submitted requests will appear here.',
                     ),
+                  for (final leave in leaves) _leaveCard(leave),
+                ],
+              ),
             ),
       floatingActionButton: FloatingActionButton(
+        tooltip: 'Request leave',
         onPressed: () => _edit(const {}),
-        child: const Icon(Icons.add),
+        child: const Icon(Icons.add_rounded),
+      ),
+    );
+  }
+
+  Widget _warningMessage(String message, VoidCallback onRetry) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: AppSpacing.md),
+      padding: const EdgeInsets.all(AppSpacing.md),
+      decoration: BoxDecoration(
+        color: AppColors.warningSurface,
+        borderRadius: BorderRadius.circular(AppRadius.medium),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.info_outline, color: AppColors.warning),
+          const SizedBox(width: AppSpacing.sm),
+          Expanded(child: Text(message)),
+          IconButton(onPressed: onRetry, icon: const Icon(Icons.refresh)),
+        ],
+      ),
+    );
+  }
+
+  Widget _leaveCard(Map<String, dynamic> leave) {
+    final local = leave.containsKey('sync_status');
+    final rawStatus = local
+        ? leave['sync_status']?.toString() ?? 'pending'
+        : leave['status']?.toString() ?? 'pending';
+    final statusLabel = local ? _localStatus(leave) : rawStatus;
+    final statusKey = local
+        ? switch (rawStatus) {
+            'synced' => 'synced',
+            'failed' => 'failed',
+            'syncing' => 'in_progress',
+            _ => 'pending',
+          }
+        : rawStatus;
+    final queueId = leave['queue_id']?.toString();
+    final start = leave['start_date']?.toString().split('T').first ?? '—';
+    final end = leave['end_date']?.toString().split('T').first ?? '—';
+
+    return Card(
+      margin: const EdgeInsets.only(bottom: AppSpacing.sm),
+      child: Padding(
+        padding: const EdgeInsets.all(AppSpacing.md),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Container(
+                  width: 40,
+                  height: 40,
+                  decoration: BoxDecoration(
+                    color: AppColors.infoSurface,
+                    borderRadius: BorderRadius.circular(AppRadius.small),
+                  ),
+                  child: Icon(
+                    local ? Icons.cloud_upload_outlined : Icons.event_note,
+                    color: AppColors.info,
+                  ),
+                ),
+                const SizedBox(width: AppSpacing.sm),
+                Expanded(
+                  child: Text(
+                    leave['leave_type']?.toString() ?? 'Leave request',
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
+                ),
+                if (!local)
+                  AppStatusBadge(status: statusKey, label: statusLabel)
+                else
+                  AppStatusBadge(
+                    status: statusKey,
+                    label: statusLabel,
+                    compact: true,
+                  ),
+              ],
+            ),
+            const SizedBox(height: AppSpacing.md),
+            Row(
+              children: [
+                const Icon(
+                  Icons.calendar_today_outlined,
+                  size: 16,
+                  color: AppColors.textSecondary,
+                ),
+                const SizedBox(width: AppSpacing.xs),
+                Expanded(child: Text('$start  –  $end')),
+              ],
+            ),
+            if ((leave['reason']?.toString() ?? '').isNotEmpty) ...[
+              const SizedBox(height: AppSpacing.sm),
+              Text(
+                leave['reason'].toString(),
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+            ],
+            if (local) ...[
+              const SizedBox(height: AppSpacing.sm),
+              AppSyncIndicator(
+                state: switch (rawStatus) {
+                  'synced' => AppSyncState.synchronized,
+                  'syncing' => AppSyncState.syncing,
+                  'failed' => AppSyncState.failed,
+                  _ => AppSyncState.pending,
+                },
+                detail: rawStatus == 'synced'
+                    ? 'The server confirmed this request.'
+                    : rawStatus == 'failed'
+                    ? leave['last_error']?.toString()
+                    : 'Saved on this device. Waiting for server confirmation.',
+              ),
+              if (queueId != null && rawStatus != 'synced')
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: Wrap(
+                    spacing: AppSpacing.xs,
+                    children: [
+                      if (rawStatus == 'failed')
+                        TextButton.icon(
+                          onPressed: () => _edit(leave),
+                          icon: const Icon(Icons.edit_outlined),
+                          label: const Text('Edit request'),
+                        ),
+                      TextButton.icon(
+                        onPressed: _retrying.contains(queueId)
+                            ? null
+                            : () => _retry(leave),
+                        icon: const Icon(Icons.sync_rounded),
+                        label: Text(
+                          _retrying.contains(queueId)
+                              ? 'Syncing'
+                              : 'Retry sync',
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+            ] else if (rawStatus == 'pending')
+              Align(
+                alignment: Alignment.centerRight,
+                child: TextButton.icon(
+                  onPressed: () => _editServerLeave(leave),
+                  icon: const Icon(Icons.edit_outlined),
+                  label: const Text('Edit request'),
+                ),
+              ),
+          ],
+        ),
       ),
     );
   }

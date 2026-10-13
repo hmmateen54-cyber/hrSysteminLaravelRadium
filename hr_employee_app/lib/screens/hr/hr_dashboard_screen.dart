@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../../components/app_error.dart';
 import '../../components/app_loader.dart';
+import '../../components/app_section_header.dart';
 import '../../components/dashboard_card.dart';
 import '../../components/logout_action.dart';
 import '../../services/api_service.dart';
@@ -110,20 +111,25 @@ class _HRDashboardScreenState extends State<HRDashboardScreen> {
           : RefreshIndicator(
               onRefresh: loadDashboard,
               child: ListView(
-                padding: const EdgeInsets.all(16),
+                padding: const EdgeInsets.fromLTRB(20, 8, 20, 28),
                 children: [
-                  const Text(
-                    'HR Overview',
-                    style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
+                  const AppSectionHeader(
+                    title: 'People operations',
+                    subtitle: 'A live overview of your team and requests',
                   ),
-                  const SizedBox(height: 20),
                   GridView.count(
-                    crossAxisCount: 2,
+                    crossAxisCount: MediaQuery.sizeOf(context).width >= 900
+                        ? 3
+                        : MediaQuery.sizeOf(context).width < 360
+                        ? 1
+                        : 2,
                     shrinkWrap: true,
                     physics: const NeverScrollableScrollPhysics(),
                     crossAxisSpacing: 12,
                     mainAxisSpacing: 12,
-                    childAspectRatio: 1.2,
+                    childAspectRatio: MediaQuery.sizeOf(context).width >= 900
+                        ? 1.5
+                        : 1.2,
                     children: [
                       DashboardCard(
                         icon: Icons.people,

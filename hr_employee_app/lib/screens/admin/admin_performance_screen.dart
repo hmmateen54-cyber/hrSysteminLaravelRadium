@@ -36,6 +36,9 @@ class _AdminPerformanceScreenState extends State<AdminPerformanceScreen> {
               onPressed: () {
                 Navigator.pop(context, true);
               },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Theme.of(context).colorScheme.error,
+              ),
               child: const Text('Delete'),
             ),
           ],

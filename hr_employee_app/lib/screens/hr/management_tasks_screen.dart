@@ -2,7 +2,12 @@ import 'package:flutter/material.dart';
 
 import '../../components/app_error.dart';
 import '../../components/app_loader.dart';
+import '../../components/app_empty_state.dart';
+import '../../components/app_section_header.dart';
+import '../../components/app_status_badge.dart';
 import '../../components/logout_action.dart';
+import '../../theme/app_colors.dart';
+import '../../theme/app_spacing.dart';
 import '../../services/api_service.dart';
 
 class ManagementTasksScreen extends StatefulWidget {
@@ -571,10 +576,21 @@ class _ManagementTasksScreenState extends State<ManagementTasksScreen> {
                     ],
                   ),
                 ),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 20),
+                  child: AppSectionHeader(
+                    title: 'Task register',
+                    subtitle:
+                        '${tasks.length} results · manage owners and deadlines',
+                  ),
+                ),
                 Expanded(
                   child: tasks.isEmpty
-                      ? const Center(
-                          child: Text('No tasks match these filters.'),
+                      ? const AppEmptyState(
+                          icon: Icons.assignment_outlined,
+                          title: 'No matching tasks',
+                          description:
+                              'Adjust the filters or create a task for your team.',
                         )
                       : RefreshIndicator(
                           onRefresh: load,
@@ -605,24 +621,49 @@ class _ManagementTasksScreenState extends State<ManagementTasksScreen> {
                                     DateUtils.dateOnly(DateTime.now()),
                                   ) &&
                                   hasOpenAssignee;
+                              final stateLabel = statuses.length == 1
+                                  ? statuses.first
+                                  : statuses.isEmpty
+                                  ? 'unassigned'
+                                  : 'multiple states';
                               return Card(
+                                margin: const EdgeInsets.only(
+                                  bottom: AppSpacing.sm,
+                                ),
                                 child: ListTile(
                                   leading: CircleAvatar(
                                     backgroundColor: overdue
-                                        ? Colors.red.withValues(alpha: .1)
+                                        ? AppColors.error.withValues(alpha: .1)
                                         : null,
                                     child: Icon(
                                       overdue
                                           ? Icons.warning_amber
                                           : Icons.assignment_outlined,
-                                      color: overdue ? Colors.red : null,
+                                      color: overdue ? AppColors.error : null,
                                     ),
                                   ),
-                                  title: Text(
-                                    task['title']?.toString() ?? 'Task',
-                                    style: const TextStyle(
-                                      fontWeight: FontWeight.w600,
-                                    ),
+                                  title: Row(
+                                    children: [
+                                      Expanded(
+                                        child: Text(
+                                          task['title']?.toString() ?? 'Task',
+                                          maxLines: 2,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: Theme.of(
+                                            context,
+                                          ).textTheme.titleSmall,
+                                        ),
+                                      ),
+                                      const SizedBox(width: 8),
+                                      AppStatusBadge(
+                                        status: overdue
+                                            ? 'overdue'
+                                            : stateLabel,
+                                        label: overdue
+                                            ? 'Overdue'
+                                            : stateLabel.replaceAll('_', ' '),
+                                      ),
+                                    ],
                                   ),
                                   subtitle: Text(
                                     [

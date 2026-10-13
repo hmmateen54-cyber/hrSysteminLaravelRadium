@@ -5,9 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="csrf-token" content="{{ csrf_token() }}">
     <title>{{ isset($header) ? strip_tags($header) . ' | ' : '' }}HR Management</title>
-    <link rel="preconnect" href="https://fonts.bunny.net">
-    <link href="https://fonts.bunny.net/css?family=montserrat:400,500,600,700&display=swap" rel="stylesheet">
-    @vite(['resources/css/app.css', 'resources/js/app.js'])
+    @vite(['resources/css/app.css', 'resources/css/design-system.css', 'resources/js/app.js'])
     @livewireStyles
 </head>
 <body class="font-sans antialiased">
@@ -70,7 +68,8 @@
                 </div>
             </header>
 
-            <main class="main-content">
+            <a class="skip-link" href="#main-content">Skip to content</a>
+            <main class="main-content" id="main-content" tabindex="-1">
                 @if(isset($header))<div class="page-heading">{{ $header }}</div>@endif
                 @if(session('success'))<div class="alert alert-success" role="status"><span class="alert-mark">✓</span>{{ session('success') }}</div>@endif
                 @if(session('error'))<div class="alert alert-error" role="alert">{{ session('error') }}</div>@endif

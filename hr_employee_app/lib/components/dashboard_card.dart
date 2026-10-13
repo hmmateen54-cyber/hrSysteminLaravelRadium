@@ -1,5 +1,9 @@
 import 'package:flutter/material.dart';
 
+import '../theme/app_colors.dart';
+import '../theme/app_radius.dart';
+import '../theme/app_spacing.dart';
+
 class DashboardCard extends StatelessWidget {
   final IconData icon;
   final String title;
@@ -14,47 +18,90 @@ class DashboardCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Card(
+    final lines = title
+        .split('\n')
+        .map((line) => line.trim())
+        .where((line) => line.isNotEmpty)
+        .toList();
+    final heading = lines.isEmpty ? title : lines.first;
+    final value = lines.length > 1 && int.tryParse(lines[1]) != null
+        ? lines[1]
+        : null;
+    final supporting = lines.skip(value == null ? 1 : 2).join('  ·  ');
+
+    return Material(
+      color: AppColors.surface,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(AppRadius.large),
+        side: const BorderSide(color: AppColors.border),
+      ),
+      clipBehavior: Clip.antiAlias,
       child: InkWell(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(12),
-          child: Container(
-            height: 130,
-            decoration: BoxDecoration(
-              color: Theme.of(context).colorScheme.surface,
-              borderRadius: BorderRadius.circular(12),
-              boxShadow: [
-                BoxShadow(
-                  color: Theme.of(context).primaryColor.withAlpha(10),
-                  blurRadius: 10,
-                  offset: const Offset(0, 4),
-                ),
-              ],
-            ),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(minHeight: 124),
+          child: Padding(
+            padding: const EdgeInsets.all(AppSpacing.md),
             child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Container(
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: Theme.of(context).primaryColor.withAlpha(20),
-                    shape: BoxShape.circle,
-                  ),
-                  child: Icon(
-                    icon, 
-                    size: 32, 
-                    color: Theme.of(context).primaryColor,
-                  ),
+                Row(
+                  children: [
+                    Container(
+                      width: 38,
+                      height: 38,
+                      decoration: BoxDecoration(
+                        color: AppColors.infoSurface,
+                        borderRadius: BorderRadius.circular(AppRadius.small),
+                      ),
+                      child: Icon(icon, color: AppColors.info, size: 19),
+                    ),
+                    const Spacer(),
+                    if (onTap != null)
+                      const Icon(
+                        Icons.arrow_outward_rounded,
+                        size: 16,
+                        color: AppColors.textSecondary,
+                      ),
+                  ],
                 ),
-                const SizedBox(height: 12),
+                const SizedBox(height: AppSpacing.sm),
                 Text(
-                  title,
-                  style: Theme.of(context).textTheme.titleMedium,
-                  textAlign: TextAlign.center,
+                  heading,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: AppColors.textSecondary,
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
+                if (value != null) ...[
+                  const SizedBox(height: AppSpacing.xxs),
+                  Text(
+                    value,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                      fontSize: 25,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: -0.5,
+                      fontFeatures: const [FontFeature.tabularFigures()],
+                    ),
+                  ),
+                ],
+                if (supporting.isNotEmpty) ...[
+                  if (value == null) const SizedBox(height: AppSpacing.xxs),
+                  Text(
+                    supporting,
+                    maxLines: value == null ? 2 : 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                ],
               ],
             ),
           ),
+        ),
       ),
     );
   }

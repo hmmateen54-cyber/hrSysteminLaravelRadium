@@ -3,6 +3,10 @@ import 'package:flutter/material.dart';
 import '../../components/app_error.dart';
 import '../../components/app_loader.dart';
 import '../../components/logout_action.dart';
+import '../../components/app_empty_state.dart';
+import '../../components/app_section_header.dart';
+import '../../components/app_status_badge.dart';
+import '../../theme/app_colors.dart';
 import '../../services/api_service.dart';
 
 class ManagementLocationsScreen extends StatefulWidget {
@@ -89,22 +93,45 @@ class _ManagementLocationsScreenState extends State<ManagementLocationsScreen> {
           ? const AppLoader()
           : error != null
           ? AppError(message: error!, onRetry: load)
-          : events.isEmpty
-          ? const Center(child: Text('No location events have synchronized.'))
           : RefreshIndicator(
               onRefresh: load,
               child: ListView(
-                padding: const EdgeInsets.all(16),
+                padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
                 children: [
+                  AppSectionHeader(
+                    title: 'Location events',
+                    subtitle: '${events.length} server-confirmed records',
+                  ),
                   const Card(
-                    child: ListTile(
-                      leading: Icon(Icons.privacy_tip_outlined),
-                      title: Text('Server-confirmed locations'),
-                      subtitle: Text(
-                        'Capture and confirmation times are shown. Precise coordinates are not displayed.',
+                    child: Padding(
+                      padding: EdgeInsets.all(16),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Icon(Icons.privacy_tip_outlined),
+                          SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text('Location privacy'),
+                                SizedBox(height: 4),
+                                Text(
+                                  'Capture and confirmation times are shown. Precise coordinates are not displayed.',
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
                       ),
                     ),
                   ),
+                  if (events.isEmpty)
+                    const AppEmptyState(
+                      icon: Icons.location_on_outlined,
+                      title: 'No location events yet',
+                      description: 'Server-confirmed events will appear here.',
+                    ),
                   for (final event in events) _eventCard(event),
                 ],
               ),
@@ -122,8 +149,8 @@ class _ManagementLocationsScreenState extends State<ManagementLocationsScreen> {
     return Card(
       child: ListTile(
         leading: const CircleAvatar(
-          backgroundColor: Color(0xFFE7F5EF),
-          child: Icon(Icons.location_on_outlined, color: Color(0xFF0B5D45)),
+          backgroundColor: AppColors.successSurface,
+          child: Icon(Icons.location_on_outlined, color: AppColors.green),
         ),
         title: Text(user['name']?.toString() ?? 'Employee'),
         subtitle: Text(
@@ -132,13 +159,7 @@ class _ManagementLocationsScreenState extends State<ManagementLocationsScreen> {
           'Confirmed: ${_formatTime(event['synced_at'])}',
         ),
         isThreeLine: true,
-        trailing: const Text(
-          'RECORDED',
-          style: TextStyle(
-            color: Color(0xFF0B5D45),
-            fontWeight: FontWeight.w700,
-          ),
-        ),
+        trailing: const AppStatusBadge(status: 'synced', label: 'Confirmed'),
       ),
     );
   }

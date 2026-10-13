@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
 
 import '../../components/app_button.dart';
+import '../../components/app_card.dart';
+import '../../components/app_section_header.dart';
 import '../../components/app_text_field.dart';
+import '../../theme/app_colors.dart';
 import '../../components/logout_action.dart';
 import '../../services/api_service.dart';
 import '../../services/offline_sync_service.dart';
@@ -205,70 +208,95 @@ class _ApplyLeaveScreenState extends State<ApplyLeaveScreen> {
         actions: const [LogoutAction()],
       ),
       body: SingleChildScrollView(
-        padding: const EdgeInsets.all(20),
+        padding: const EdgeInsets.fromLTRB(20, 8, 20, 28),
         child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            AppSectionHeader(
+              title: serverLeaveId != null
+                  ? 'Update your request'
+                  : 'Request time away',
+              subtitle:
+                  'Choose the dates and provide the details for your request.',
+            ),
             if (loadError != null)
               Padding(
-                padding: const EdgeInsets.only(bottom: 16),
+                padding: const EdgeInsets.only(bottom: 12),
                 child: Text(
                   loadError!,
-                  style: const TextStyle(color: Colors.red),
+                  style: const TextStyle(color: AppColors.error),
                 ),
               ),
-            GestureDetector(
-              onTap: () => _chooseDate(startDateController),
-              child: AbsorbPointer(
-                child: AppTextField(
-                  controller: startDateController,
-                  label: 'Start Date',
-                  hint: 'YYYY-MM-DD',
-                ),
+            AppCard(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  GestureDetector(
+                    onTap: () => _chooseDate(startDateController),
+                    child: AbsorbPointer(
+                      child: AppTextField(
+                        controller: startDateController,
+                        label: 'Start date',
+                        hint: 'Select the first day',
+                        suffixIcon: const Icon(Icons.calendar_month_outlined),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  GestureDetector(
+                    onTap: () => _chooseDate(endDateController),
+                    child: AbsorbPointer(
+                      child: AppTextField(
+                        controller: endDateController,
+                        label: 'End date',
+                        hint: 'Select the last day',
+                        suffixIcon: const Icon(Icons.calendar_month_outlined),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  DropdownButtonFormField<String>(
+                    initialValue: leaveType,
+                    decoration: const InputDecoration(labelText: 'Leave type'),
+                    items: const [
+                      DropdownMenuItem(value: 'Casual', child: Text('Casual')),
+                      DropdownMenuItem(value: 'Sick', child: Text('Sick')),
+                      DropdownMenuItem(value: 'Annual', child: Text('Annual')),
+                      DropdownMenuItem(
+                        value: 'Emergency',
+                        child: Text('Emergency'),
+                      ),
+                    ],
+                    onChanged: loading
+                        ? null
+                        : (value) {
+                            if (value != null) {
+                              setState(() => leaveType = value);
+                            }
+                          },
+                  ),
+                  const SizedBox(height: 16),
+                  AppTextField(
+                    controller: reasonController,
+                    label: 'Reason',
+                    hint: 'Add a short explanation',
+                    maxLines: 4,
+                    maxLength: 2000,
+                    textCapitalization: TextCapitalization.sentences,
+                  ),
+                  const SizedBox(height: 12),
+                  AppButton(
+                    text: serverLeaveId != null
+                        ? 'Save changes'
+                        : queueId == null
+                        ? 'Submit request'
+                        : 'Save and retry sync',
+                    leadingIcon: Icons.send_outlined,
+                    loading: loading,
+                    onPressed: submitLeave,
+                  ),
+                ],
               ),
-            ),
-            const SizedBox(height: 16),
-            GestureDetector(
-              onTap: () => _chooseDate(endDateController),
-              child: AbsorbPointer(
-                child: AppTextField(
-                  controller: endDateController,
-                  label: 'End Date',
-                  hint: 'YYYY-MM-DD',
-                ),
-              ),
-            ),
-            const SizedBox(height: 16),
-            DropdownButtonFormField<String>(
-              initialValue: leaveType,
-              decoration: const InputDecoration(
-                labelText: 'Leave Type',
-                border: OutlineInputBorder(),
-              ),
-              items: const [
-                DropdownMenuItem(value: 'Casual', child: Text('Casual')),
-                DropdownMenuItem(value: 'Sick', child: Text('Sick')),
-                DropdownMenuItem(value: 'Annual', child: Text('Annual')),
-                DropdownMenuItem(value: 'Emergency', child: Text('Emergency')),
-              ],
-              onChanged: (value) {
-                if (value != null) setState(() => leaveType = value);
-              },
-            ),
-            const SizedBox(height: 16),
-            AppTextField(
-              controller: reasonController,
-              label: 'Reason',
-              maxLines: 4,
-            ),
-            const SizedBox(height: 24),
-            AppButton(
-              text: serverLeaveId != null
-                  ? 'Save Changes'
-                  : queueId == null
-                  ? 'Submit Leave'
-                  : 'Save and Retry',
-              loading: loading,
-              onPressed: submitLeave,
             ),
           ],
         ),

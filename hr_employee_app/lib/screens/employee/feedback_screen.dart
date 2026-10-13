@@ -1,9 +1,12 @@
 import 'package:flutter/material.dart';
 
 import '../../components/app_error.dart';
+import '../../components/app_empty_state.dart';
 import '../../components/app_loader.dart';
 import '../../components/logout_action.dart';
 import '../../components/offline_cache_banner.dart';
+import '../../components/app_section_header.dart';
+import '../../components/app_status_badge.dart';
 import '../../services/api_service.dart';
 import '../../services/offline_sync_service.dart';
 
@@ -230,6 +233,10 @@ class _EmployeeFeedbackScreenState extends State<EmployeeFeedbackScreen> {
               child: ListView(
                 padding: const EdgeInsets.all(16),
                 children: [
+                  const AppSectionHeader(
+                    title: 'Feedback',
+                    subtitle: 'Share a workplace suggestion or raise a concern',
+                  ),
                   if (offlineMode)
                     OfflineCacheBanner(
                       fetchedAt: cacheFetchedAt,
@@ -245,8 +252,13 @@ class _EmployeeFeedbackScreenState extends State<EmployeeFeedbackScreen> {
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
                           Text(
-                            'Share feedback',
-                            style: Theme.of(context).textTheme.titleLarge,
+                            'New submission',
+                            style: Theme.of(context).textTheme.titleMedium,
+                          ),
+                          const SizedBox(height: 5),
+                          Text(
+                            'Choose a category and include enough detail for HR to follow up.',
+                            style: Theme.of(context).textTheme.bodySmall,
                           ),
                           const SizedBox(height: 16),
                           DropdownButtonFormField<String>(
@@ -343,11 +355,11 @@ class _EmployeeFeedbackScreenState extends State<EmployeeFeedbackScreen> {
                     style: Theme.of(context).textTheme.titleLarge,
                   ),
                   if (records.isEmpty)
-                    const Padding(
-                      padding: EdgeInsets.only(top: 24),
-                      child: Center(
-                        child: Text('You have not submitted feedback yet.'),
-                      ),
+                    const AppEmptyState(
+                      icon: Icons.forum_outlined,
+                      title: 'No feedback submitted',
+                      description:
+                          'Your past submissions and their review status will appear here.',
                     ),
                   for (final record in records) _feedbackCard(record),
                 ],
@@ -367,15 +379,14 @@ class _EmployeeFeedbackScreenState extends State<EmployeeFeedbackScreen> {
             _ => 'Waiting to sync',
           }
         : (record['status']?.toString() ?? 'new');
-    final color = local
-        ? record['sync_status'] == 'synced'
-              ? Colors.green
-              : record['sync_status'] == 'failed'
-              ? Colors.red
-              : Colors.amber.shade800
-        : record['status'] == 'resolved'
-        ? Colors.green
-        : Colors.blueGrey;
+    final statusKey = local
+        ? switch (record['sync_status']) {
+            'synced' => 'synced',
+            'failed' => 'failed',
+            'syncing' => 'in_progress',
+            _ => 'pending',
+          }
+        : record['status']?.toString() ?? 'new';
     final queueId = record['queue_id']?.toString();
     return Card(
       child: Padding(
@@ -388,13 +399,10 @@ class _EmployeeFeedbackScreenState extends State<EmployeeFeedbackScreen> {
                 Expanded(
                   child: Text(
                     record['subject']?.toString() ?? 'Feedback',
-                    style: const TextStyle(fontWeight: FontWeight.w600),
+                    style: Theme.of(context).textTheme.titleSmall,
                   ),
                 ),
-                Text(
-                  status.toUpperCase(),
-                  style: TextStyle(color: color, fontWeight: FontWeight.w600),
-                ),
+                AppStatusBadge(status: statusKey, label: status),
               ],
             ),
             const SizedBox(height: 6),

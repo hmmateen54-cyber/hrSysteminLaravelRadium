@@ -6,9 +6,15 @@ import 'package:geolocator/geolocator.dart';
 import '../../components/app_loader.dart';
 import '../../components/logout_action.dart';
 import '../../components/offline_cache_banner.dart';
+import '../../components/app_empty_state.dart';
+import '../../components/app_section_header.dart';
+import '../../components/app_status_badge.dart';
 import '../../services/api_service.dart';
 import '../../services/auto_refresh_controller.dart';
 import '../../services/offline_sync_service.dart';
+import '../../theme/app_colors.dart';
+import '../../theme/app_radius.dart';
+import '../../theme/app_spacing.dart';
 
 enum _LocationState { neutral, loading, available, waiting, uploaded, error }
 
@@ -35,21 +41,6 @@ class _AttendanceScreenState extends State<AttendanceScreen>
   String locationMessage = 'Location has not been requested.';
   _LocationState locationState = _LocationState.neutral;
   String? locationQueueId;
-
-  Color get _locationColor => switch (locationState) {
-    _LocationState.uploaded => Colors.green,
-    _LocationState.available || _LocationState.waiting => Colors.amber.shade800,
-    _LocationState.error => Colors.red,
-    _ => Colors.blueGrey,
-  };
-
-  IconData get _locationIcon => switch (locationState) {
-    _LocationState.available || _LocationState.uploaded => Icons.location_on,
-    _LocationState.waiting => Icons.cloud_upload_outlined,
-    _LocationState.loading => Icons.hourglass_top,
-    _LocationState.error => Icons.location_off,
-    _ => Icons.location_searching,
-  };
 
   @override
   void initState() {
@@ -479,7 +470,14 @@ class _AttendanceScreenState extends State<AttendanceScreen>
     return Scaffold(
       appBar: AppBar(
         title: const Text('My Attendance'),
-        actions: const [LogoutAction()],
+        actions: [
+          IconButton(
+            tooltip: 'Refresh attendance',
+            onPressed: getAttendance,
+            icon: const Icon(Icons.refresh_rounded),
+          ),
+          const LogoutAction(),
+        ],
       ),
       body: loading
           ? const AppLoader()
@@ -505,26 +503,47 @@ class _AttendanceScreenState extends State<AttendanceScreen>
                     },
                   ),
                 Card(
-                  margin: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+                  margin: const EdgeInsets.fromLTRB(20, 12, 20, 8),
                   child: Padding(
-                    padding: const EdgeInsets.all(16),
+                    padding: const EdgeInsets.all(AppSpacing.md),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
                         Row(
                           children: [
-                            Icon(_locationIcon, color: _locationColor),
-                            const SizedBox(width: 8),
                             Expanded(
                               child: Text(
-                                locationMessage,
-                                style: TextStyle(color: _locationColor),
+                                'Location confirmation',
+                                style: Theme.of(context).textTheme.titleSmall,
                               ),
+                            ),
+                            AppStatusBadge(
+                              status: switch (locationState) {
+                                _LocationState.uploaded => 'synced',
+                                _LocationState.waiting ||
+                                _LocationState.available => 'pending',
+                                _LocationState.loading => 'in_progress',
+                                _LocationState.error => 'failed',
+                                _ => 'neutral',
+                              },
+                              label: switch (locationState) {
+                                _LocationState.uploaded => 'Server confirmed',
+                                _LocationState.waiting => 'Waiting to sync',
+                                _LocationState.available => 'Captured',
+                                _LocationState.loading => 'Locating',
+                                _LocationState.error => 'Needs attention',
+                                _ => 'Not recorded',
+                              },
                             ),
                           ],
                         ),
-                        const SizedBox(height: 8),
-                        OutlinedButton.icon(
+                        const SizedBox(height: AppSpacing.xs),
+                        Text(
+                          locationMessage,
+                          style: Theme.of(context).textTheme.bodySmall,
+                        ),
+                        const SizedBox(height: AppSpacing.md),
+                        FilledButton.icon(
                           onPressed: locationState == _LocationState.loading
                               ? null
                               : handleLocationAction,
@@ -536,7 +555,7 @@ class _AttendanceScreenState extends State<AttendanceScreen>
                                   ),
                                 )
                               : const Icon(Icons.my_location),
-                          label: const Text('Share Location'),
+                          label: const Text('Capture location'),
                         ),
                         if (locationState == _LocationState.waiting) ...[
                           const SizedBox(height: 4),
@@ -556,88 +575,27 @@ class _AttendanceScreenState extends State<AttendanceScreen>
                   ),
                 ),
                 Expanded(
-                  child: attendance.isEmpty
-                      ? RefreshIndicator(
-                          onRefresh: getAttendance,
-                          child: ListView(
-                            children: [
-                              if (_offlineMode)
-                                OfflineCacheBanner(
-                                  fetchedAt: _cacheFetchedAt,
-                                  onRetry: getAttendance,
-                                ),
-                              const SizedBox(height: 150),
-                              const Center(
-                                child: Text('No attendance records found'),
-                              ),
-                            ],
-                          ),
-                        )
-                      : RefreshIndicator(
-                          onRefresh: getAttendance,
-                          child: ListView.builder(
-                            padding: const EdgeInsets.all(16),
-                            itemCount: attendance.length,
-                            itemBuilder: (context, index) {
-                              final record = attendance[index];
-                              final local = record.containsKey('sync_status');
-
-                              final syncStatus = record['sync_status']
-                                  ?.toString();
-
-                              final status = local
-                                  ? syncStatus == 'synced'
-                                        ? 'Server confirmed'
-                                        : syncStatus == 'retry'
-                                        ? 'Waiting to retry'
-                                        : syncStatus == 'failed'
-                                        ? 'Sync failed'
-                                        : 'Waiting to sync'
-                                  : (record['status'] ?? 'present').toString();
-
-                              final color = local
-                                  ? syncStatus == 'synced'
-                                        ? Colors.blue
-                                        : syncStatus == 'failed'
-                                        ? Colors.red
-                                        : Colors.amber
-                                  : Colors.blue;
-
-                              return Card(
-                                margin: const EdgeInsets.only(bottom: 12),
-                                child: ListTile(
-                                  leading: CircleAvatar(
-                                    backgroundColor: color.withValues(
-                                      alpha: .12,
-                                    ),
-                                    child: Icon(
-                                      Icons.calendar_month,
-                                      color: color,
-                                    ),
-                                  ),
-                                  title: Text(
-                                    record['attendance_date']?.toString() ??
-                                        '-',
-                                    style: const TextStyle(
-                                      fontWeight: FontWeight.bold,
-                                    ),
-                                  ),
-                                  subtitle: Text(
-                                    'Check in: ${record['check_in'] ?? '-'}\n'
-                                    '${local ? 'Saved on this device.' : 'Check out: ${record['check_out'] ?? '-'}'}',
-                                  ),
-                                  trailing: Text(
-                                    status.toUpperCase(),
-                                    style: TextStyle(
-                                      fontWeight: FontWeight.bold,
-                                      color: color,
-                                    ),
-                                  ),
-                                ),
-                              );
-                            },
-                          ),
+                  child: RefreshIndicator(
+                    onRefresh: getAttendance,
+                    child: ListView(
+                      padding: const EdgeInsets.fromLTRB(20, 4, 20, 24),
+                      children: [
+                        const AppSectionHeader(
+                          title: 'Attendance history',
+                          subtitle: 'Daily records and sync confirmation',
                         ),
+                        if (attendance.isEmpty)
+                          const AppEmptyState(
+                            icon: Icons.calendar_month_outlined,
+                            title: 'No attendance records',
+                            description:
+                                'Your recorded attendance will appear here.',
+                          ),
+                        for (final record in attendance)
+                          _attendanceCard(record),
+                      ],
+                    ),
+                  ),
                 ),
               ],
             ),
@@ -649,7 +607,54 @@ class _AttendanceScreenState extends State<AttendanceScreen>
                 child: CircularProgressIndicator(strokeWidth: 2),
               )
             : const Icon(Icons.fingerprint),
-        label: Text(checkingIn ? 'Saving…' : 'Check In'),
+        label: Text(checkingIn ? 'Saving…' : 'Check in'),
+      ),
+    );
+  }
+
+  Widget _attendanceCard(Map<String, dynamic> record) {
+    final local = record.containsKey('sync_status');
+    final syncStatus = record['sync_status']?.toString();
+    final status = local
+        ? syncStatus == 'synced'
+              ? 'Server confirmed'
+              : syncStatus == 'retry'
+              ? 'Waiting to retry'
+              : syncStatus == 'failed'
+              ? 'Sync failed'
+              : 'Waiting to sync'
+        : (record['status'] ?? 'present').toString();
+    final statusKey = local
+        ? syncStatus == 'synced'
+              ? 'synced'
+              : syncStatus == 'failed'
+              ? 'failed'
+              : 'pending'
+        : status;
+    return Card(
+      margin: const EdgeInsets.only(bottom: AppSpacing.sm),
+      child: ListTile(
+        leading: Container(
+          width: 40,
+          height: 40,
+          decoration: BoxDecoration(
+            color: AppColors.infoSurface,
+            borderRadius: BorderRadius.circular(AppRadius.small),
+          ),
+          child: const Icon(
+            Icons.calendar_month_outlined,
+            color: AppColors.info,
+          ),
+        ),
+        title: Text(
+          record['attendance_date']?.toString() ?? 'Date unavailable',
+        ),
+        subtitle: Text(
+          'Check in: ${record['check_in'] ?? '—'}\n'
+          '${local ? 'Saved on this device.' : 'Check out: ${record['check_out'] ?? '—'}'}',
+        ),
+        isThreeLine: true,
+        trailing: AppStatusBadge(status: statusKey, label: status),
       ),
     );
   }

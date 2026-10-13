@@ -94,7 +94,9 @@ class _HRPerformanceScreenState extends State<HRPerformanceScreen> {
           ),
           FilledButton(
             onPressed: () => Navigator.pop(dialogContext, true),
-            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            style: FilledButton.styleFrom(
+              backgroundColor: Theme.of(context).colorScheme.error,
+            ),
             child: const Text('Delete'),
           ),
         ],
@@ -213,8 +215,8 @@ class _HRPerformanceScreenState extends State<HRPerformanceScreen> {
                                   }
                                 }
                               },
-                              itemBuilder: (context) => const [
-                                PopupMenuItem(
+                              itemBuilder: (context) => [
+                                const PopupMenuItem(
                                   value: 'edit',
                                   child: Row(
                                     children: [
@@ -230,7 +232,9 @@ class _HRPerformanceScreenState extends State<HRPerformanceScreen> {
                                     children: [
                                       Icon(
                                         Icons.delete_outline,
-                                        color: Colors.red,
+                                        color: Theme.of(
+                                          context,
+                                        ).colorScheme.error,
                                       ),
                                       SizedBox(width: 8),
                                       Text('Delete'),

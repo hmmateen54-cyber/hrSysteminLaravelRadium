@@ -10,6 +10,12 @@ class AppTextField extends StatelessWidget {
   final String? Function(String?)? validator;
   final ValueChanged<String>? onChanged;
   final TextInputAction? textInputAction;
+  final Widget? prefixIcon;
+  final Widget? suffixIcon;
+  final String? helperText;
+  final int? maxLength;
+  final bool enabled;
+  final TextCapitalization textCapitalization;
 
   const AppTextField({
     super.key,
@@ -22,6 +28,12 @@ class AppTextField extends StatelessWidget {
     this.validator,
     this.onChanged,
     this.textInputAction,
+    this.prefixIcon,
+    this.suffixIcon,
+    this.helperText,
+    this.maxLength,
+    this.enabled = true,
+    this.textCapitalization = TextCapitalization.none,
   });
 
   @override
@@ -34,7 +46,17 @@ class AppTextField extends StatelessWidget {
       validator: validator,
       onChanged: onChanged,
       textInputAction: textInputAction,
-      decoration: InputDecoration(labelText: label, hintText: hint),
+      textCapitalization: textCapitalization,
+      maxLength: maxLength,
+      enabled: enabled,
+      decoration: InputDecoration(
+        labelText: label,
+        hintText: hint,
+        helperText: helperText,
+        prefixIcon: prefixIcon,
+        suffixIcon: suffixIcon,
+        alignLabelWithHint: maxLines > 1,
+      ),
     );
   }
 }

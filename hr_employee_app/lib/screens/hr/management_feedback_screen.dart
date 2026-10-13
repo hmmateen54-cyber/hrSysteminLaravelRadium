@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
 
 import '../../components/app_error.dart';
+import '../../components/app_empty_state.dart';
 import '../../components/app_loader.dart';
 import '../../components/logout_action.dart';
+import '../../components/app_section_header.dart';
+import '../../components/app_status_badge.dart';
 import '../../services/api_service.dart';
 
 class ManagementFeedbackScreen extends StatefulWidget {
@@ -188,6 +191,14 @@ class _ManagementFeedbackScreenState extends State<ManagementFeedbackScreen> {
           ? AppError(message: error!, onRetry: load)
           : Column(
               children: [
+                const Padding(
+                  padding: EdgeInsets.symmetric(horizontal: 20),
+                  child: AppSectionHeader(
+                    title: 'Employee feedback',
+                    subtitle:
+                        'Review submissions and record a private response',
+                  ),
+                ),
                 Padding(
                   padding: const EdgeInsets.all(12),
                   child: Wrap(
@@ -222,8 +233,10 @@ class _ManagementFeedbackScreenState extends State<ManagementFeedbackScreen> {
                 ),
                 Expanded(
                   child: feedback.isEmpty
-                      ? const Center(
-                          child: Text('No feedback matches these filters.'),
+                      ? const AppEmptyState(
+                          icon: Icons.forum_outlined,
+                          title: 'No matching feedback',
+                          description: 'Try another category or status filter.',
                         )
                       : RefreshIndicator(
                           onRefresh: load,
@@ -237,15 +250,10 @@ class _ManagementFeedbackScreenState extends State<ManagementFeedbackScreen> {
                                         'Employee'
                                   : 'Employee';
                               return Card(
+                                margin: const EdgeInsets.only(bottom: 12),
                                 child: ListTile(
                                   leading: const CircleAvatar(
                                     child: Icon(Icons.feedback_outlined),
-                                  ),
-                                  title: Text(
-                                    record['subject']?.toString() ?? 'Feedback',
-                                    style: const TextStyle(
-                                      fontWeight: FontWeight.w600,
-                                    ),
                                   ),
                                   subtitle: Text(
                                     '$author  •  ${record['category'] ?? 'other'}  •  ${record['created_at'] ?? ''}\n${record['message'] ?? ''}',
@@ -253,9 +261,26 @@ class _ManagementFeedbackScreenState extends State<ManagementFeedbackScreen> {
                                     overflow: TextOverflow.ellipsis,
                                   ),
                                   isThreeLine: true,
-                                  trailing: Text(
-                                    (record['status']?.toString() ?? 'new')
-                                        .toUpperCase(),
+                                  title: Row(
+                                    children: [
+                                      Expanded(
+                                        child: Text(
+                                          record['subject']?.toString() ??
+                                              'Feedback',
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: Theme.of(
+                                            context,
+                                          ).textTheme.titleSmall,
+                                        ),
+                                      ),
+                                      const SizedBox(width: 8),
+                                      AppStatusBadge(
+                                        status:
+                                            record['status']?.toString() ??
+                                            'new',
+                                      ),
+                                    ],
                                   ),
                                   onTap: () => editFeedback(record),
                                 ),
