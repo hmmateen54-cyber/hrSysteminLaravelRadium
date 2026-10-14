@@ -81,8 +81,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
                   Text(
                     user?['name'] ?? '-',
-                    style: const TextStyle(
-                      fontSize: 24,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context).textTheme.headlineSmall?.copyWith(
                       fontWeight: FontWeight.bold,
                     ),
                   ),

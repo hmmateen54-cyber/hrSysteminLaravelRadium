@@ -57,6 +57,10 @@ class _HRAppState extends State<HRApp> with WidgetsBindingObserver {
       title: 'HR Management',
 
       theme: AppTheme.lightTheme,
+      builder: (context, child) => Theme(
+        data: AppTheme.forViewportWidth(MediaQuery.sizeOf(context).width),
+        child: child ?? const SizedBox.shrink(),
+      ),
 
       home: const SplashScreen(),
     );

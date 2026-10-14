@@ -70,7 +70,7 @@ class DashboardCard extends StatelessWidget {
                   heading,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
                     color: AppColors.textSecondary,
                     fontWeight: FontWeight.w600,
                   ),
@@ -82,6 +82,7 @@ class DashboardCard extends StatelessWidget {
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                      fontFamily: 'Roboto',
                       fontSize: 25,
                       fontWeight: FontWeight.w700,
                       letterSpacing: -0.5,

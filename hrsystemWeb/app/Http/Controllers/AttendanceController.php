@@ -14,7 +14,7 @@ class AttendanceController extends Controller
      */
     public function index()
     {
-        $attendances = Attendance::with('employee.user')
+        $attendances = Attendance::with(['employee.user', 'checkInLocationEvent'])
             ->latest('attendance_date')
             ->paginate(15);
 

@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 use App\Models\Employee;
 
 class Attendance extends Model
@@ -34,5 +35,12 @@ class Attendance extends Model
     public function locationEvents(): HasMany
     {
         return $this->hasMany(LocationEvent::class);
+    }
+
+    public function checkInLocationEvent(): HasOne
+    {
+        // The check-in event records the location associated with the attendance start.
+        return $this->hasOne(LocationEvent::class, 'attendance_id')
+            ->where('event_type', 'check_in');
     }
 }

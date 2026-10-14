@@ -1,5 +1,15 @@
+@font-face {
+    font-family: "Montserrat";
+    src: url("../fonts/Montserrat-Variable.ttf") format("truetype");
+    font-style: normal;
+    font-weight: 100 900;
+    font-display: swap;
+}
+
 :root {
-    font-family: Roboto, "Segoe UI", Arial, sans-serif;
+    --font-body: "Roboto", "Segoe UI", Arial, sans-serif;
+    --font-heading: "Montserrat", var(--font-body);
+    font-family: var(--font-body);
     color: #101828;
     background: #f4f7fa;
     font-synthesis: none;
@@ -21,15 +31,14 @@ html { scroll-behavior: smooth; }
 body, .landing-body, .auth-body {
     background: #f4f7fa;
     color: #101828;
-    font-family: Roboto, "Segoe UI", Arial, sans-serif;
+    font-family: var(--font-body) !important;
     font-size: 14px;
     line-height: 1.5;
 }
-body, button, input, select, textarea,
-table th *, table td *, table .btn, table .btn-link, table button,
-table input, table select, table textarea,
-.pagination-wrap nav, .pagination-wrap nav *:not(svg):not(svg *) {
-    font-family: Roboto, "Segoe UI", Arial, sans-serif !important;
+button, input, select, textarea,
+table, table th, table td, table caption,
+.pagination-wrap nav {
+    font-family: var(--font-body) !important;
 }
 ::selection { background: #d5eee4; color: #0a1428; }
 
@@ -118,11 +127,22 @@ table input, table select, table textarea,
     color: #101828;
     font-weight: 700;
     letter-spacing: -.45px;
+    line-height: 1.25;
+    overflow-wrap: anywhere;
 }
-.page-heading h1 { font-size: 23px; }
+.page-heading h1 { font-size: clamp(20px, 2vw, 25px); }
+.page-title { font-size: clamp(21px, 2.2vw, 28px); }
 .page-heading p, .page-subtitle { color: #667085; }
 .eyebrow { color: #0b5d45; letter-spacing: 1.2px; }
 .app-footer { color: #7c8798; border-top: 1px solid #e4e9f0; }
+
+h1, h2, h3, h4, h5, h6,
+.page-title, .panel-title, .empty-state > strong,
+.jetstream-modal .text-lg.font-medium {
+    font-family: var(--font-heading) !important;
+    line-height: 1.3;
+    overflow-wrap: anywhere;
+}
 
 .metric-grid { gap: 15px; margin-bottom: 19px; }
 .metric-card {
@@ -154,7 +174,7 @@ a.metric-card:hover {
     box-shadow: 0 3px 12px #101b3607;
 }
 .panel-head { padding: 17px 20px; border-bottom-color: #edf0f4; }
-.panel-title { color: #101828; font-size: 14px; }
+.panel-title { color: #101828; font-size: clamp(15px, 1.25vw, 18px); }
 .panel-caption { color: #758195; font-size: 12px; }
 .panel-body { padding: 20px; }
 .panel-link, .btn-link { color: #0b5d45; }
@@ -231,6 +251,93 @@ main input:focus-visible, main select:focus-visible, main textarea:focus-visible
 .field-error { color: #b42318; font-size: 11px; }
 .helper-text { color: #667085; font-size: 11px; }
 .form-actions { border-top-color: #e4e9f0; }
+
+/* Keep task fields readable and prevent text-input sizing from stretching checkboxes. */
+.task-form { color-scheme: light; }
+.task-form label.field {
+    display: grid;
+    align-content: start;
+    gap: 7px;
+    color: #344054;
+}
+.task-form .field input:not([type="checkbox"]):not([type="radio"]),
+.task-form .field select,
+.task-form .field textarea {
+    background-color: #fff;
+    color: #101828;
+    opacity: 1;
+}
+.task-form .field input::placeholder,
+.task-form .field textarea::placeholder {
+    color: #667085;
+    opacity: 1;
+}
+.task-form .field select option {
+    background-color: #fff;
+    color: #101828;
+}
+.task-form .field input[type="checkbox"] {
+    appearance: auto;
+    width: 16px;
+    min-width: 16px;
+    height: 16px;
+    min-height: 16px;
+    margin: 2px 0 0;
+    padding: 0;
+    border: 1px solid #98a2b3;
+    border-radius: 4px;
+    background: #fff;
+    color: #0b5d45;
+    flex: 0 0 16px;
+    accent-color: #0b5d45;
+    opacity: 1;
+}
+.task-form .employee-assignment-field {
+    min-width: 0;
+    margin: 0;
+    padding: 12px 14px 14px;
+    border: 1px solid #d5dde6;
+    border-radius: 9px;
+}
+.task-form .employee-assignment-field legend {
+    padding: 0 7px;
+    color: #344054;
+    font-size: 13px;
+    font-weight: 600;
+}
+.task-form .employee-check-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr));
+    gap: 10px;
+    margin-top: 10px;
+}
+.task-form .check-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 11px;
+    min-width: 0;
+    margin: 0;
+    padding: 12px;
+    border: 1px solid #d5dde6;
+    border-radius: 9px;
+    background: #fff;
+    color: #344054;
+    cursor: pointer;
+    transition: border-color .16s ease, background-color .16s ease, box-shadow .16s ease;
+}
+.task-form .check-row > span {
+    display: grid;
+    gap: 3px;
+    min-width: 0;
+}
+.task-form .check-row strong { color: #101828; font-weight: 600; }
+.task-form .check-row small { color: #667085; line-height: 1.45; }
+.task-form .check-row:hover { border-color: #9dbfb0; background: #f8fcfa; }
+.task-form .check-row:focus-within {
+    border-color: #13795b;
+    box-shadow: 0 0 0 3px #13795b20;
+}
+.task-form .field-error { color: #b42318; }
 .empty-state {
     padding: 42px 20px;
     color: #667085;
@@ -312,6 +419,15 @@ input:focus-visible, select:focus-visible, textarea:focus-visible,
     .metric-label { font-size: 10px; }
     .page-title { font-size: 21px; }
     .landing-page { padding-right: 18px; padding-left: 18px; }
+}
+@media (max-width: 480px) {
+    .landing-copy h1 {
+        font-size: clamp(28px, 8.4vw, 36px);
+        line-height: 1.15;
+        letter-spacing: -.9px;
+    }
+    .landing-section-heading h2 { font-size: clamp(20px, 5.5vw, 22px); }
+    .auth-form-heading h1 { font-size: clamp(19px, 5vw, 21px); }
 }
 @media (prefers-reduced-motion: reduce) {
     *, *::before, *::after {

@@ -836,9 +836,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
             displayName,
             maxLines: 2,
             overflow: TextOverflow.ellipsis,
-            style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+            style: Theme.of(context).textTheme.headlineMedium?.copyWith(
               color: Colors.white,
-              fontSize: 27,
               fontWeight: FontWeight.w700,
             ),
           ),

@@ -45,70 +45,123 @@ class AppTheme {
         ),
         iconTheme: IconThemeData(color: primaryColor),
       ),
-      fontFamily: 'Roboto', // Default fallback body font
+      fontFamily: 'Roboto',
       textTheme: const TextTheme(
         displayLarge: TextStyle(
           fontFamily: 'Montserrat',
           color: textPrimary,
           fontWeight: FontWeight.bold,
+          fontSize: 36,
+          height: 1.15,
         ),
         displayMedium: TextStyle(
           fontFamily: 'Montserrat',
           color: textPrimary,
           fontWeight: FontWeight.bold,
+          fontSize: 32,
+          height: 1.2,
         ),
         displaySmall: TextStyle(
           fontFamily: 'Montserrat',
           color: textPrimary,
           fontWeight: FontWeight.bold,
+          fontSize: 28,
+          height: 1.2,
         ),
         headlineLarge: TextStyle(
           fontFamily: 'Montserrat',
           color: textPrimary,
           fontWeight: FontWeight.w600,
+          fontSize: 26,
+          height: 1.25,
         ),
         headlineMedium: TextStyle(
           fontFamily: 'Montserrat',
           color: textPrimary,
           fontWeight: FontWeight.w600,
+          fontSize: 23,
+          height: 1.25,
         ),
         headlineSmall: TextStyle(
           fontFamily: 'Montserrat',
           color: textPrimary,
           fontWeight: FontWeight.w600,
+          fontSize: 20,
+          height: 1.25,
         ),
         titleLarge: TextStyle(
           fontFamily: 'Montserrat',
           color: textPrimary,
           fontWeight: FontWeight.w600,
+          fontSize: 18,
+          height: 1.3,
         ),
         titleMedium: TextStyle(
           fontFamily: 'Montserrat',
           color: textPrimary,
           fontWeight: FontWeight.w600,
+          fontSize: 16,
+          height: 1.35,
         ),
         titleSmall: TextStyle(
           fontFamily: 'Montserrat',
           color: textPrimary,
           fontWeight: FontWeight.w600,
+          fontSize: 14,
+          height: 1.35,
         ),
-        bodyLarge: TextStyle(fontFamily: 'Roboto', color: textPrimary),
-        bodyMedium: TextStyle(fontFamily: 'Roboto', color: textPrimary),
-        bodySmall: TextStyle(fontFamily: 'Roboto', color: textSecondary),
+        bodyLarge: TextStyle(
+          fontFamily: 'Roboto',
+          color: textPrimary,
+          fontSize: 16,
+          height: 1.5,
+        ),
+        bodyMedium: TextStyle(
+          fontFamily: 'Roboto',
+          color: textPrimary,
+          fontSize: 14,
+          height: 1.45,
+        ),
+        bodySmall: TextStyle(
+          fontFamily: 'Roboto',
+          color: textSecondary,
+          fontSize: 12,
+          height: 1.4,
+        ),
         labelLarge: TextStyle(
           fontFamily: 'Roboto',
           color: textPrimary,
           fontWeight: FontWeight.w500,
+          fontSize: 14,
+          height: 1.3,
         ),
         labelMedium: TextStyle(
           fontFamily: 'Roboto',
           color: textSecondary,
           fontWeight: FontWeight.w500,
+          fontSize: 13,
+          height: 1.3,
         ),
         labelSmall: TextStyle(
           fontFamily: 'Roboto',
           color: textSecondary,
           fontWeight: FontWeight.w500,
+          fontSize: 12,
+          height: 1.3,
+        ),
+      ),
+      listTileTheme: const ListTileThemeData(
+        titleTextStyle: TextStyle(
+          fontFamily: 'Roboto',
+          color: textPrimary,
+          fontSize: 14,
+          fontWeight: FontWeight.w600,
+        ),
+        subtitleTextStyle: TextStyle(
+          fontFamily: 'Roboto',
+          color: textSecondary,
+          fontSize: 13,
+          height: 1.4,
         ),
       ),
       elevatedButtonTheme: ElevatedButtonThemeData(
@@ -201,6 +254,38 @@ class AppTheme {
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.all(Radius.circular(8)),
         ),
+      ),
+    );
+  }
+
+  static ThemeData forViewportWidth(double width) {
+    final theme = lightTheme;
+    if (width >= 380) return theme;
+
+    final scale = width < 340 ? 0.9 : 0.95;
+    TextStyle? compact(TextStyle? style) {
+      final size = style?.fontSize;
+      return size == null ? style : style!.copyWith(fontSize: size * scale);
+    }
+
+    final text = theme.textTheme;
+    return theme.copyWith(
+      textTheme: text.copyWith(
+        displayLarge: compact(text.displayLarge),
+        displayMedium: compact(text.displayMedium),
+        displaySmall: compact(text.displaySmall),
+        headlineLarge: compact(text.headlineLarge),
+        headlineMedium: compact(text.headlineMedium),
+        headlineSmall: compact(text.headlineSmall),
+        titleLarge: compact(text.titleLarge),
+        titleMedium: compact(text.titleMedium),
+        titleSmall: compact(text.titleSmall),
+      ),
+      appBarTheme: theme.appBarTheme.copyWith(
+        titleTextStyle: compact(theme.appBarTheme.titleTextStyle),
+      ),
+      dialogTheme: theme.dialogTheme.copyWith(
+        titleTextStyle: compact(theme.dialogTheme.titleTextStyle),
       ),
     );
   }

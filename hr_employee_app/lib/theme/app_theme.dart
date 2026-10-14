@@ -18,7 +18,11 @@ class AppTheme {
   static const Color error = AppColors.error;
 
   static ThemeData get lightTheme {
-    final base = ThemeData(useMaterial3: true, brightness: Brightness.light);
+    final base = ThemeData(
+      useMaterial3: true,
+      brightness: Brightness.light,
+      fontFamily: 'Roboto',
+    );
     const colorScheme = ColorScheme.light(
       primary: AppColors.navy,
       onPrimary: AppColors.white,
@@ -38,25 +42,23 @@ class AppTheme {
       canvasColor: AppColors.background,
       visualDensity: VisualDensity.standard,
       splashFactory: InkSparkle.splashFactory,
-      textTheme: base.textTheme
-          .apply(fontFamily: 'Roboto')
-          .copyWith(
-            displayLarge: AppTextStyles.display.copyWith(fontSize: 57),
-            displayMedium: AppTextStyles.display.copyWith(fontSize: 45),
-            displaySmall: AppTextStyles.display.copyWith(fontSize: 36),
-            headlineLarge: AppTextStyles.screenTitle.copyWith(fontSize: 32),
-            headlineMedium: AppTextStyles.screenTitle.copyWith(fontSize: 28),
-            headlineSmall: AppTextStyles.screenTitle.copyWith(fontSize: 24),
-            titleLarge: AppTextStyles.sectionTitle.copyWith(fontSize: 20),
-            titleMedium: AppTextStyles.cardTitle.copyWith(fontSize: 16),
-            titleSmall: AppTextStyles.cardTitle,
-            bodyLarge: AppTextStyles.body.copyWith(fontSize: 16),
-            bodyMedium: AppTextStyles.body,
-            bodySmall: AppTextStyles.metadata,
-            labelLarge: AppTextStyles.button,
-            labelMedium: AppTextStyles.fieldLabel,
-            labelSmall: AppTextStyles.status,
-          ),
+      textTheme: base.textTheme.copyWith(
+        displayLarge: AppTextStyles.display.copyWith(fontSize: 36),
+        displayMedium: AppTextStyles.display.copyWith(fontSize: 32),
+        displaySmall: AppTextStyles.display.copyWith(fontSize: 28),
+        headlineLarge: AppTextStyles.screenTitle.copyWith(fontSize: 26),
+        headlineMedium: AppTextStyles.screenTitle.copyWith(fontSize: 23),
+        headlineSmall: AppTextStyles.screenTitle.copyWith(fontSize: 20),
+        titleLarge: AppTextStyles.sectionTitle.copyWith(fontSize: 18),
+        titleMedium: AppTextStyles.cardTitle.copyWith(fontSize: 16),
+        titleSmall: AppTextStyles.cardTitle.copyWith(fontSize: 14),
+        bodyLarge: AppTextStyles.body.copyWith(fontSize: 16),
+        bodyMedium: AppTextStyles.body,
+        bodySmall: AppTextStyles.metadata,
+        labelLarge: AppTextStyles.button,
+        labelMedium: AppTextStyles.fieldLabel,
+        labelSmall: AppTextStyles.status,
+      ),
       appBarTheme: const AppBarTheme(
         backgroundColor: AppColors.background,
         foregroundColor: AppColors.textPrimary,
@@ -84,7 +86,7 @@ class AppTheme {
         minVerticalPadding: AppSpacing.sm,
         iconColor: AppColors.info,
         textColor: AppColors.textPrimary,
-        titleTextStyle: AppTextStyles.cardTitle,
+        titleTextStyle: AppTextStyles.body,
         subtitleTextStyle: AppTextStyles.secondary,
       ),
       elevatedButtonTheme: ElevatedButtonThemeData(
@@ -229,6 +231,38 @@ class AppTheme {
       splashColor: AppColors.emerald.withValues(alpha: 0.08),
       highlightColor: AppColors.navy.withValues(alpha: 0.04),
       hoverColor: AppColors.navy.withValues(alpha: 0.04),
+    );
+  }
+
+  static ThemeData forViewportWidth(double width) {
+    final theme = lightTheme;
+    if (width >= 380) return theme;
+
+    final scale = width < 340 ? 0.9 : 0.95;
+    TextStyle? compact(TextStyle? style) {
+      final size = style?.fontSize;
+      return size == null ? style : style!.copyWith(fontSize: size * scale);
+    }
+
+    final text = theme.textTheme;
+    return theme.copyWith(
+      textTheme: text.copyWith(
+        displayLarge: compact(text.displayLarge),
+        displayMedium: compact(text.displayMedium),
+        displaySmall: compact(text.displaySmall),
+        headlineLarge: compact(text.headlineLarge),
+        headlineMedium: compact(text.headlineMedium),
+        headlineSmall: compact(text.headlineSmall),
+        titleLarge: compact(text.titleLarge),
+        titleMedium: compact(text.titleMedium),
+        titleSmall: compact(text.titleSmall),
+      ),
+      appBarTheme: theme.appBarTheme.copyWith(
+        titleTextStyle: compact(theme.appBarTheme.titleTextStyle),
+      ),
+      dialogTheme: theme.dialogTheme.copyWith(
+        titleTextStyle: compact(theme.dialogTheme.titleTextStyle),
+      ),
     );
   }
 }

@@ -167,7 +167,7 @@ class _EmployeeTasksScreenState extends State<EmployeeTasksScreen> {
           [
             ?project,
             'Priority: ${task['priority'] ?? 'normal'}',
-            'Due: ${task['due_date'] ?? 'Not set'}',
+            'Due: ${task['due_date'].toString().split("T")[0] ?? 'Not set'}',
             'Status: ${status.replaceAll('_', ' ')}',
           ].join('  •  '),
         ),
@@ -297,10 +297,10 @@ class _EmployeeTaskDetailScreenState extends State<EmployeeTaskDetailScreen> {
                   const SizedBox(height: 12),
                   Text('Priority  ·  ${task['priority'] ?? 'normal'}'),
                   const SizedBox(height: 6),
-                  Text('Due date  ·  ${task['due_date'] ?? 'Not set'}'),
+                  Text('Due date  ·  ${task['due_date'].toString().split("T")[0] ?? 'Not set'}'),
                   const SizedBox(height: 6),
                   Text(
-                    'Assigned  ·  ${widget.assignment['assigned_at'] ?? '—'}',
+                    'Assigned  ·  ${widget.assignment['assigned_at'].toString().split("T")[0] ?? '—'}',
                   ),
                   const SizedBox(height: 14),
                   const Divider(height: 1),

@@ -4,7 +4,7 @@ import 'app_colors.dart';
 
 abstract final class AppTextStyles {
   static const display = TextStyle(
-    fontFamily: 'Roboto',
+    fontFamily: 'Montserrat',
     fontSize: 30,
     height: 1.15,
     fontWeight: FontWeight.w700,
@@ -13,7 +13,7 @@ abstract final class AppTextStyles {
   );
 
   static const screenTitle = TextStyle(
-    fontFamily: 'Roboto',
+    fontFamily: 'Montserrat',
     fontSize: 21,
     height: 1.25,
     fontWeight: FontWeight.w700,
@@ -22,7 +22,7 @@ abstract final class AppTextStyles {
   );
 
   static const sectionTitle = TextStyle(
-    fontFamily: 'Roboto',
+    fontFamily: 'Montserrat',
     fontSize: 16,
     height: 1.35,
     fontWeight: FontWeight.w700,
@@ -30,7 +30,7 @@ abstract final class AppTextStyles {
   );
 
   static const cardTitle = TextStyle(
-    fontFamily: 'Roboto',
+    fontFamily: 'Montserrat',
     fontSize: 14,
     height: 1.35,
     fontWeight: FontWeight.w600,
