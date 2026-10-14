@@ -25,7 +25,6 @@ Route::get('/user', function (Request $request) {
     ]);
 })->middleware(['auth:sanctum', 'role:admin,hr,employee']);
 
-
 Route::get('/test', function () {
     return response()->json([
         'message' => 'Laravel API is working!',
