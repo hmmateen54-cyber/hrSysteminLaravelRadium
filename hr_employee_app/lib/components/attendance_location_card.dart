@@ -78,7 +78,7 @@ class AttendanceLocationCard extends StatelessWidget {
             Text(
               _addressLabel,
               style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                fontWeight: hasAddress ? FontWeight.w600 : FontWeight.normal,
+                fontWeight: hasAddress ? FontWeight.w500 : FontWeight.normal,
               ),
             ),
             if (hasAddress) ...[

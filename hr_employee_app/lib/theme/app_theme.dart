@@ -186,7 +186,7 @@ class AppTheme {
         ),
         labelStyle: AppTextStyles.metadata.copyWith(
           color: AppColors.info,
-          fontWeight: FontWeight.w600,
+          fontWeight: FontWeight.w500,
         ),
         padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xs),
       ),

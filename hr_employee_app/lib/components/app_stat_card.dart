@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_radius.dart';
 import '../theme/app_spacing.dart';
+import '../theme/app_text_styles.dart';
 
 class AppStatCard extends StatelessWidget {
   final String label;
@@ -24,6 +25,7 @@ class AppStatCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isNumericValue = double.tryParse(value.trim()) != null;
     return Material(
       color: AppColors.surface,
       shape: RoundedRectangleBorder(
@@ -47,7 +49,7 @@ class AppStatCard extends StatelessWidget {
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                       style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        fontWeight: FontWeight.w600,
+                        fontWeight: FontWeight.w500,
                       ),
                     ),
                   ),
@@ -70,13 +72,12 @@ class AppStatCard extends StatelessWidget {
                 value,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                  fontFamily: 'Roboto',
-                  fontSize: 26,
-                  fontWeight: FontWeight.w700,
-                  color: AppColors.textPrimary,
-                  fontFeatures: const [FontFeature.tabularFigures()],
-                ),
+                style: isNumericValue
+                    ? AppTextStyles.metric.copyWith(fontSize: 26)
+                    : AppTextStyles.status.copyWith(
+                        fontSize: 12,
+                        color: AppColors.textPrimary,
+                      ),
               ),
               if (supportingText != null) ...[
                 const SizedBox(height: AppSpacing.xxs),

@@ -211,7 +211,7 @@ class _HRAddPerformanceScreenState extends State<HRAddPerformanceScreen> {
                     const SizedBox(height: 20),
                     const Text(
                       'Review Date',
-                      style: TextStyle(fontWeight: FontWeight.w600),
+                      style: TextStyle(fontWeight: FontWeight.w500),
                     ),
                     const SizedBox(height: 8),
                     OutlinedButton.icon(

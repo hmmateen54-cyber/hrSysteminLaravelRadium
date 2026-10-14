@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_radius.dart';
 import '../theme/app_spacing.dart';
+import '../theme/app_text_styles.dart';
 
 class DashboardCard extends StatelessWidget {
   final IconData icon;
@@ -81,13 +82,7 @@ class DashboardCard extends StatelessWidget {
                     value,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                      fontFamily: 'Roboto',
-                      fontSize: 25,
-                      fontWeight: FontWeight.w700,
-                      letterSpacing: -0.5,
-                      fontFeatures: const [FontFeature.tabularFigures()],
-                    ),
+                    style: AppTextStyles.metric.copyWith(fontSize: 25),
                   ),
                 ],
                 if (supporting.isNotEmpty) ...[

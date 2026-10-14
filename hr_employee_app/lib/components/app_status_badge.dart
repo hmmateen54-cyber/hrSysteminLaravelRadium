@@ -80,7 +80,8 @@ class AppStatusBadge extends StatelessWidget {
           overflow: TextOverflow.ellipsis,
           style: Theme.of(context).textTheme.labelSmall?.copyWith(
             color: _foreground,
-            fontSize: compact ? 10 : 11,
+            fontSize: compact ? 11 : 12,
+            fontWeight: FontWeight.w500,
           ),
         ),
       ),

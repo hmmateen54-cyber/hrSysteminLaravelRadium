@@ -48,7 +48,7 @@ dependencies:
 dev_dependencies:
   flutter_test:
     sdk: flutter
-
+  flutter_launcher_icons: ^0.14.4
   # The "flutter_lints" package below contains a set of recommended lints to
   # encourage good coding practices. The lint set provided by the package is
   # activated in the `analysis_options.yaml` file located at the root of your
@@ -67,10 +67,22 @@ flutter:
   # the material Icons class.
   uses-material-design: true
 
+  assets:
+    - fonts/Montserrat-OFL.txt
+    - fonts/Roboto_LICENSE.txt
+
   fonts:
     - family: Montserrat
       fonts:
         - asset: fonts/Montserrat-Variable.ttf
+    - family: Roboto
+      fonts:
+        - asset: fonts/Roboto-Regular.ttf
+          weight: 400
+        - asset: fonts/Roboto-Medium.ttf
+          weight: 500
+        - asset: fonts/Roboto-Bold.ttf
+          weight: 700
 
   # To add assets to your application, add an assets section, like this:
   # assets:
@@ -102,3 +114,10 @@ flutter:
   #
   # For details regarding fonts from package dependencies,
   # see https://flutter.dev/to/font-from-package
+
+flutter_launcher_icons:
+  android: true
+  ios: true
+  image_path: "assets/icons/app_icon.jpg"
+  adaptive_icon_background: "#101B36"
+  adaptive_icon_foreground: "assets/icons/app_icon.jpg"

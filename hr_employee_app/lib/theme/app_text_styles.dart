@@ -54,14 +54,14 @@ abstract final class AppTextStyles {
   static const fieldLabel = TextStyle(
     fontFamily: 'Roboto',
     fontSize: 13,
-    fontWeight: FontWeight.w600,
+    fontWeight: FontWeight.w500,
     color: AppColors.textSecondary,
   );
 
   static const button = TextStyle(
     fontFamily: 'Roboto',
     fontSize: 14,
-    fontWeight: FontWeight.w600,
+    fontWeight: FontWeight.w500,
     letterSpacing: 0.1,
   );
 
@@ -75,7 +75,7 @@ abstract final class AppTextStyles {
   static const status = TextStyle(
     fontFamily: 'Roboto',
     fontSize: 11,
-    fontWeight: FontWeight.w700,
+    fontWeight: FontWeight.w500,
     letterSpacing: 0.15,
   );
 
