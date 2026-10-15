@@ -27,6 +27,7 @@ class OfflineSyncService {
 
   static Database? _db;
   static bool _syncing = false;
+  static bool _syncRequestedWhileRunning = false;
   static Timer? _retryTimer;
   static StreamSubscription<List<ConnectivityResult>>?
   _connectivitySubscription;
@@ -146,18 +147,67 @@ class OfflineSyncService {
     final owner = await ApiService.getCurrentUserId();
     if (owner == null) return;
     final db = await database;
+    var savedItems = items;
+    if (key == 'tasks') {
+      final cachedRows = await db.query(
+        'user_cache',
+        where: 'owner_id = ? AND cache_key = ?',
+        whereArgs: [owner.toString(), 'tasks'],
+        limit: 1,
+      );
+      if (cachedRows.isNotEmpty) {
+        try {
+          final decoded = jsonDecode(cachedRows.first['payload'] as String);
+          final previous = decoded is List
+              ? decoded
+                    .whereType<Map>()
+                    .map((row) => Map<String, dynamic>.from(row))
+                    .toList()
+              : <Map<String, dynamic>>[];
+          final queuedRows = await db.query(
+            'sync_queue',
+            where: "owner_id = ? AND operation = ? AND status != 'synced'",
+            whereArgs: [owner.toString(), 'task_status'],
+          );
+          final pendingAssignmentIds = <String>{};
+          for (final row in queuedRows) {
+            final payload = jsonDecode(row['payload'] as String);
+            if (payload is Map && payload['assignment_id'] != null) {
+              pendingAssignmentIds.add(payload['assignment_id'].toString());
+            }
+          }
+          if (pendingAssignmentIds.isNotEmpty) {
+            final remoteIds = items
+                .map((item) => item['id']?.toString())
+                .toSet();
+            savedItems = [
+              ...items,
+              ...previous.where(
+                (item) =>
+                    pendingAssignmentIds.contains(item['id']?.toString()) &&
+                    !remoteIds.contains(item['id']?.toString()),
+              ),
+            ];
+          }
+        } on FormatException {
+          // Keep the live response if an old cached task payload is malformed.
+        }
+      }
+    }
     await db.insert('user_cache', {
       'owner_id': owner.toString(),
       'cache_key': key,
-      'payload': jsonEncode(items),
+      'payload': jsonEncode(savedItems),
       'fetched_at': DateTime.now().toUtc().toIso8601String(),
     }, conflictAlgorithm: ConflictAlgorithm.replace);
+    if (key == 'tasks') await _refreshCachedTasks(owner.toString(), db);
   }
 
   static Future<Map<String, dynamic>?> readCachedItems(String key) async {
     final owner = await ApiService.getCurrentUserId();
     if (owner == null) return null;
     final db = await database;
+    if (key == 'tasks') await _refreshCachedTasks(owner.toString(), db);
     final rows = await db.query(
       'user_cache',
       where: 'owner_id = ? AND cache_key = ?',
@@ -178,6 +228,244 @@ class OfflineSyncService {
       };
     } on FormatException {
       return null;
+    }
+  }
+
+  static const taskStatuses = {
+    'assigned',
+    'in_progress',
+    'completed',
+    'on_hold',
+  };
+
+  static Future<String> queueTaskStatusUpdate({
+    required Map<String, dynamic> assignment,
+    required String status,
+    required String progressNotes,
+  }) async {
+    if (!taskStatuses.contains(status)) {
+      throw ArgumentError('Choose a valid task status.');
+    }
+    final assignmentId = _positiveId(assignment['id']);
+    final task = assignment['task'] is Map
+        ? Map<String, dynamic>.from(assignment['task'])
+        : <String, dynamic>{};
+    final taskId = _positiveId(task['id']);
+    if (assignmentId == null || taskId == null) {
+      throw ArgumentError(
+        'Load this task from the server before updating it offline.',
+      );
+    }
+    if (progressNotes.length > 3000) {
+      throw ArgumentError('Progress notes must be 3000 characters or fewer.');
+    }
+
+    final owner = await _currentOwnerId();
+    final db = await database;
+    late String queueId;
+    final now = DateTime.now().toUtc();
+    final originalUpdatedAt = now.toIso8601String();
+    final clientId = _uuid.v4();
+    queueId = 'task-status-$owner-$clientId';
+
+    await db.transaction((txn) async {
+      final cacheRows = await txn.query(
+        'user_cache',
+        where: 'owner_id = ? AND cache_key = ?',
+        whereArgs: [owner, 'tasks'],
+        limit: 1,
+      );
+      List<Map<String, dynamic>> cachedAssignments;
+      String? fetchedAt;
+      if (cacheRows.isEmpty) {
+        // The screen supplied a server-loaded assignment; seed the same cache
+        // used by My Tasks and the employee dashboard.
+        cachedAssignments = [Map<String, dynamic>.from(assignment)];
+      } else {
+        final decoded = jsonDecode(cacheRows.first['payload'] as String);
+        cachedAssignments = decoded is List
+            ? decoded
+                  .whereType<Map>()
+                  .map((row) => Map<String, dynamic>.from(row))
+                  .toList()
+            : <Map<String, dynamic>>[];
+        fetchedAt = cacheRows.first['fetched_at']?.toString();
+      }
+
+      final taskEvents = await txn.query(
+        'sync_queue',
+        columns: ['payload', 'status'],
+        where: 'owner_id = ? AND operation = ?',
+        whereArgs: [owner, 'task_status'],
+        orderBy: 'rowid ASC',
+      );
+      var outstandingCount = 0;
+      for (final event in taskEvents) {
+        final eventPayload = jsonDecode(event['payload'] as String);
+        if (eventPayload is Map &&
+            eventPayload['assignment_id']?.toString() ==
+                assignmentId.toString() &&
+            event['status'] != 'synced') {
+          outstandingCount++;
+        }
+      }
+
+      final cachedIndex = cachedAssignments.indexWhere(
+        (row) => row['id']?.toString() == assignmentId.toString(),
+      );
+      final base = cachedIndex >= 0
+          ? cachedAssignments[cachedIndex]
+          : Map<String, dynamic>.from(assignment);
+      final serverVersion =
+          int.tryParse(base['progress_version']?.toString() ?? '') ??
+          int.tryParse(assignment['progress_version']?.toString() ?? '') ??
+          0;
+      final payload = <String, dynamic>{
+        'assignment_id': assignmentId,
+        'task_id': taskId,
+        'status': status,
+        'progress_notes': progressNotes,
+        'expected_version': serverVersion + outstandingCount,
+        'original_updated_at': originalUpdatedAt,
+      };
+
+      await txn.insert('sync_queue', {
+        'queue_id': queueId,
+        'owner_id': owner,
+        'operation': 'task_status',
+        'client_id': clientId,
+        'payload': jsonEncode(payload),
+        'created_at': originalUpdatedAt,
+        'status': 'waiting',
+      });
+
+      final optimistic = Map<String, dynamic>.from(base)
+        ..['status'] = status
+        ..['progress_notes'] = progressNotes
+        ..['sync_status'] = 'waiting'
+        ..['sync_queue_id'] = queueId
+        ..remove('sync_error');
+      if (cachedIndex >= 0) {
+        cachedAssignments[cachedIndex] = optimistic;
+      } else {
+        cachedAssignments.insert(0, optimistic);
+      }
+      await txn.insert('user_cache', {
+        'owner_id': owner,
+        'cache_key': 'tasks',
+        'payload': jsonEncode(cachedAssignments),
+        'fetched_at': fetchedAt ?? originalUpdatedAt,
+      }, conflictAlgorithm: ConflictAlgorithm.replace);
+    });
+
+    _queueChanged();
+    unawaited(syncPendingLeaves());
+    return queueId;
+  }
+
+  static int? _positiveId(dynamic value) {
+    final id = int.tryParse(value?.toString() ?? '');
+    return id != null && id > 0 ? id : null;
+  }
+
+  static Future<Map<String, dynamic>?> getTaskSyncState(
+    String assignmentId,
+  ) async {
+    final owner = await ApiService.getCurrentUserId();
+    if (owner == null) return null;
+    final db = await database;
+    final rows = await db.query(
+      'sync_queue',
+      where: 'owner_id = ? AND operation = ?',
+      whereArgs: [owner.toString(), 'task_status'],
+      orderBy: 'rowid ASC',
+    );
+    Map<String, Object?>? latestRow;
+    Map<String, Object?>? failedRow;
+    for (final row in rows) {
+      final payload = jsonDecode(row['payload'] as String);
+      if (payload is Map &&
+          payload['assignment_id']?.toString() == assignmentId) {
+        latestRow = row;
+        if (failedRow == null && row['status'] == 'failed') failedRow = row;
+      }
+    }
+    if (latestRow == null) return null;
+    final latestPayload = jsonDecode(latestRow['payload'] as String) as Map;
+    final stateRow = failedRow ?? latestRow;
+    return {
+      ...Map<String, dynamic>.from(latestPayload),
+      'queue_id': stateRow['queue_id'],
+      'sync_status': stateRow['status'],
+      'last_error': stateRow['last_error'],
+    };
+  }
+
+  static Future<void> _refreshCachedTasks(
+    String owner,
+    DatabaseExecutor db,
+  ) async {
+    final cacheRows = await db.query(
+      'user_cache',
+      where: 'owner_id = ? AND cache_key = ?',
+      whereArgs: [owner, 'tasks'],
+      limit: 1,
+    );
+    if (cacheRows.isEmpty) return;
+
+    try {
+      final decoded = jsonDecode(cacheRows.first['payload'] as String);
+      if (decoded is! List) return;
+      final assignments = decoded
+          .whereType<Map>()
+          .map((row) => Map<String, dynamic>.from(row))
+          .toList();
+      final rows = await db.query(
+        'sync_queue',
+        where: 'owner_id = ? AND operation = ?',
+        whereArgs: [owner, 'task_status'],
+        orderBy: 'rowid ASC',
+      );
+      final latestByAssignment = <String, Map<String, Object?>>{};
+      final failedByAssignment = <String, Map<String, Object?>>{};
+      for (final row in rows) {
+        final payload = jsonDecode(row['payload'] as String);
+        if (payload is Map && payload['assignment_id'] != null) {
+          final assignmentId = payload['assignment_id'].toString();
+          latestByAssignment[assignmentId] = row;
+          if (row['status'] == 'failed') {
+            failedByAssignment.putIfAbsent(assignmentId, () => row);
+          }
+        }
+      }
+
+      for (final assignment in assignments) {
+        final assignmentId = assignment['id']?.toString();
+        if (assignmentId == null) continue;
+        final latestRow = latestByAssignment[assignmentId];
+        if (latestRow == null) continue;
+        final latestPayload = jsonDecode(latestRow['payload'] as String) as Map;
+        final latestStatus = latestRow['status']?.toString() ?? 'waiting';
+        if (latestStatus != 'synced') {
+          assignment['status'] = latestPayload['status'];
+          assignment['progress_notes'] = latestPayload['progress_notes'];
+        }
+
+        final stateRow = failedByAssignment[assignmentId] ?? latestRow;
+        assignment['sync_status'] = stateRow['status']?.toString() ?? 'waiting';
+        assignment['sync_error'] = stateRow['last_error'];
+        assignment['sync_queue_id'] = stateRow['queue_id'];
+        if (stateRow['status'] == 'synced') assignment.remove('sync_error');
+      }
+
+      await db.update(
+        'user_cache',
+        {'payload': jsonEncode(assignments)},
+        where: 'owner_id = ? AND cache_key = ?',
+        whereArgs: [owner, 'tasks'],
+      );
+    } on FormatException {
+      // Keep the cache available to the caller if its JSON is malformed.
     }
   }
 
@@ -630,6 +918,16 @@ class OfflineSyncService {
     final owner = await ApiService.getCurrentUserId();
     if (owner == null) return;
     final db = await database;
+    final rows = await db.query(
+      'sync_queue',
+      where: 'queue_id = ? AND owner_id = ?',
+      whereArgs: [queueId, owner.toString()],
+      limit: 1,
+    );
+    if (rows.isNotEmpty && rows.first['operation'] == 'task_status') {
+      await _retryTaskQueueItem(rows.first, owner.toString());
+      return;
+    }
     await db.update(
       'sync_queue',
       {
@@ -643,6 +941,143 @@ class OfflineSyncService {
     );
     _queueChanged();
     await syncPendingLeaves(force: true);
+  }
+
+  static Future<void> _retryTaskQueueItem(
+    Map<String, Object?> row,
+    String owner,
+  ) async {
+    final queueId = row['queue_id'] as String;
+    final payload =
+        jsonDecode(row['payload'] as String) as Map<String, dynamic>;
+    final assignmentId = payload['assignment_id']?.toString();
+    if (assignmentId == null) return;
+
+    Map<String, dynamic>? serverAssignment;
+    try {
+      final response = await ApiService.get('/employee/tasks/$assignmentId');
+      final data = response['data'];
+      if (ApiService.isSuccess(response['status']) && data is Map) {
+        final assignment = data['assignment'];
+        if (assignment is Map && assignment['id']?.toString() == assignmentId) {
+          serverAssignment = Map<String, dynamic>.from(assignment);
+        }
+      }
+    } catch (_) {
+      // Keep the failed event intact when the server cannot be reached.
+    }
+    if (serverAssignment == null) return;
+
+    final db = await database;
+    final serverVersion =
+        int.tryParse(serverAssignment['progress_version']?.toString() ?? '') ??
+        0;
+    await db.transaction((txn) async {
+      final currentRows = await txn.query(
+        'sync_queue',
+        columns: ['rowid', 'payload'],
+        where: 'queue_id = ? AND owner_id = ?',
+        whereArgs: [queueId, owner],
+        limit: 1,
+      );
+      if (currentRows.isEmpty) return;
+      final currentPayload =
+          jsonDecode(currentRows.first['payload'] as String)
+              as Map<String, dynamic>;
+      currentPayload['expected_version'] = serverVersion;
+      await txn.update(
+        'sync_queue',
+        {
+          'payload': jsonEncode(currentPayload),
+          'status': 'waiting',
+          'retry_count': 0,
+          'next_attempt_at': null,
+          'last_error': null,
+        },
+        where: 'queue_id = ? AND owner_id = ?',
+        whereArgs: [queueId, owner],
+      );
+      await _rebaseFollowingTaskUpdates(
+        txn,
+        owner,
+        assignmentId,
+        currentRows.first['rowid'] as int,
+        serverVersion + 1,
+      );
+      await _storeTaskAssignmentInCache(txn, owner, serverAssignment!);
+    });
+    await _refreshCachedTasks(owner, db);
+    _queueChanged();
+    await syncPendingLeaves(force: true);
+  }
+
+  static Future<void> _rebaseFollowingTaskUpdates(
+    DatabaseExecutor db,
+    String owner,
+    String assignmentId,
+    int afterRowId,
+    int nextVersion,
+  ) async {
+    final rows = await db.query(
+      'sync_queue',
+      where: 'owner_id = ? AND operation = ? AND rowid > ?',
+      whereArgs: [owner, 'task_status', afterRowId],
+      orderBy: 'rowid ASC',
+    );
+    var expectedVersion = nextVersion;
+    for (final row in rows) {
+      final payload = jsonDecode(row['payload'] as String);
+      if (payload is! Map ||
+          payload['assignment_id']?.toString() != assignmentId ||
+          row['status'] == 'synced') {
+        continue;
+      }
+      final updated = Map<String, dynamic>.from(payload)
+        ..['expected_version'] = expectedVersion;
+      await db.update(
+        'sync_queue',
+        {'payload': jsonEncode(updated)},
+        where: 'queue_id = ? AND owner_id = ?',
+        whereArgs: [row['queue_id'], owner],
+      );
+      expectedVersion++;
+    }
+  }
+
+  static Future<void> _storeTaskAssignmentInCache(
+    DatabaseExecutor db,
+    String owner,
+    Map<String, dynamic> serverAssignment,
+  ) async {
+    final cacheRows = await db.query(
+      'user_cache',
+      where: 'owner_id = ? AND cache_key = ?',
+      whereArgs: [owner, 'tasks'],
+      limit: 1,
+    );
+    if (cacheRows.isEmpty) return;
+    try {
+      final decoded = jsonDecode(cacheRows.first['payload'] as String);
+      if (decoded is! List) return;
+      final assignments = decoded
+          .whereType<Map>()
+          .map((row) => Map<String, dynamic>.from(row))
+          .toList();
+      final index = assignments.indexWhere(
+        (row) => row['id']?.toString() == serverAssignment['id']?.toString(),
+      );
+      if (index >= 0) {
+        assignments[index] = Map<String, dynamic>.from(serverAssignment);
+        await db.update(
+          'user_cache',
+          {'payload': jsonEncode(assignments)},
+          where: 'owner_id = ? AND cache_key = ?',
+          whereArgs: [owner, 'tasks'],
+        );
+      }
+    } on FormatException {
+      // A later successful task-list fetch will repair malformed cache JSON.
+    }
   }
 
   static Future<void> retryAddressResolution(String queueId) async {
@@ -660,7 +1095,10 @@ class OfflineSyncService {
   }
 
   static Future<void> syncPendingLeaves({bool force = false}) async {
-    if (_syncing) return;
+    if (_syncing) {
+      _syncRequestedWhileRunning = true;
+      return;
+    }
     _syncing = true;
     try {
       final owner = await ApiService.getCurrentUserId();
@@ -668,8 +1106,8 @@ class OfflineSyncService {
       if (owner == null || token == null || token.isEmpty) return;
 
       final connectivity = await Connectivity().checkConnectivity();
-      if (connectivity.length == 1 &&
-          connectivity.first == ConnectivityResult.none) {
+      if (connectivity.isEmpty ||
+          connectivity.every((result) => result == ConnectivityResult.none)) {
         return;
       }
 
@@ -685,6 +1123,7 @@ class OfflineSyncService {
           await _syncItem(item);
         }
       }
+      await _syncTaskQueue(owner.toString(), force: force, token: token);
       await _syncPendingAddresses(owner.toString(), force: force);
     } catch (error) {
       // Do not log payloads, tokens, or exact coordinates.
@@ -694,6 +1133,66 @@ class OfflineSyncService {
     } finally {
       _syncing = false;
       await _scheduleRetry();
+      if (_syncRequestedWhileRunning) {
+        _syncRequestedWhileRunning = false;
+        unawaited(syncPendingLeaves());
+      }
+    }
+  }
+
+  static Future<void> _syncTaskQueue(
+    String owner, {
+    required bool force,
+    required String token,
+  }) async {
+    final db = await database;
+    final rows = await db.query(
+      'sync_queue',
+      where: 'owner_id = ? AND operation = ?',
+      whereArgs: [owner, 'task_status'],
+      orderBy: 'rowid ASC',
+    );
+    final blockedAssignments = <String>{};
+    final now = DateTime.now().toUtc();
+
+    for (final row in rows) {
+      final payload = jsonDecode(row['payload'] as String);
+      if (payload is! Map) continue;
+      final assignmentId = payload['assignment_id']?.toString();
+      if (assignmentId == null || blockedAssignments.contains(assignmentId)) {
+        continue;
+      }
+
+      final status = row['status']?.toString();
+      if (status == 'synced') continue;
+      if (status == 'failed' || (status != 'waiting' && status != 'retry')) {
+        blockedAssignments.add(assignmentId);
+        continue;
+      }
+      final nextAttempt = DateTime.tryParse(
+        row['next_attempt_at']?.toString() ?? '',
+      );
+      if (!force && nextAttempt != null && nextAttempt.isAfter(now)) {
+        blockedAssignments.add(assignmentId);
+        continue;
+      }
+
+      if (await ApiService.getCurrentUserId() != int.tryParse(owner) ||
+          await ApiService.getStoredToken() != token) {
+        return;
+      }
+      await _syncItem(row);
+
+      final refreshed = await db.query(
+        'sync_queue',
+        columns: ['status'],
+        where: 'queue_id = ? AND owner_id = ?',
+        whereArgs: [row['queue_id'], owner],
+        limit: 1,
+      );
+      if (refreshed.isEmpty || refreshed.first['status'] != 'synced') {
+        blockedAssignments.add(assignmentId);
+      }
     }
   }
 
@@ -710,7 +1209,7 @@ class OfflineSyncService {
           ? "owner_id = ? AND operation = ? AND status IN ('waiting', 'retry')"
           : "owner_id = ? AND operation = ? AND status IN ('waiting', 'retry') AND (next_attempt_at IS NULL OR next_attempt_at <= ?)",
       whereArgs: force ? [owner, operation] : [owner, operation, now],
-      orderBy: 'created_at ASC',
+      orderBy: 'created_at ASC, rowid ASC',
     );
   }
 
@@ -729,6 +1228,9 @@ class OfflineSyncService {
       where: 'queue_id = ? AND owner_id = ?',
       whereArgs: [queueId, owner],
     );
+    if (operation == 'task_status') {
+      await _refreshCachedTasks(owner, db);
+    }
     _queueChanged();
 
     try {
@@ -740,6 +1242,7 @@ class OfflineSyncService {
               : '/employee/attendance',
         'location' => '/employee/location-events',
         'feedback' => '/employee/feedback',
+        'task_status' => '/employee/tasks/${payload['assignment_id']}/progress',
         _ => throw StateError('Unsupported queued operation'),
       };
       final body = operation == 'leave'
@@ -748,8 +1251,16 @@ class OfflineSyncService {
           ? payload.containsKey('action_type')
                 ? {...payload, 'client_event_id': clientId}
                 : {...payload, 'sync_id': clientId}
+          : operation == 'task_status'
+          ? {
+              ...payload,
+              'client_event_id': clientId,
+              'client_updated_at': payload['original_updated_at'],
+            }
           : payload;
-      final response = await ApiService.post(endpoint, body);
+      final response = operation == 'task_status'
+          ? await ApiService.patch(endpoint, body)
+          : await ApiService.post(endpoint, body);
       final status = response['status'];
       final data = response['data'];
 
@@ -761,6 +1272,68 @@ class OfflineSyncService {
             row,
             'The server response did not confirm the saved attendance location. The event remains queued.',
           );
+          return;
+        }
+        if (operation == 'task_status') {
+          final assignment = data is Map ? data['assignment'] : null;
+          if (assignment is! Map ||
+              assignment['id']?.toString() !=
+                  payload['assignment_id']?.toString() ||
+              data['client_event_id']?.toString() != clientId ||
+              assignment['progress_version'] == null) {
+            await _markRetry(
+              row,
+              'The server did not confirm this task update. It remains queued.',
+            );
+            return;
+          }
+
+          final serverAssignment = Map<String, dynamic>.from(assignment);
+          final assignmentVersion = int.tryParse(
+            serverAssignment['progress_version'].toString(),
+          );
+          if (assignmentVersion == null) {
+            await _markRetry(
+              row,
+              'The server response did not include a task version. The update remains queued.',
+            );
+            return;
+          }
+          await db.transaction((txn) async {
+            await _storeTaskAssignmentInCache(txn, owner, serverAssignment);
+            final eventRows = await txn.query(
+              'sync_queue',
+              columns: ['rowid'],
+              where: 'queue_id = ? AND owner_id = ?',
+              whereArgs: [queueId, owner],
+              limit: 1,
+            );
+            if (eventRows.isNotEmpty) {
+              await _rebaseFollowingTaskUpdates(
+                txn,
+                owner,
+                payload['assignment_id'].toString(),
+                eventRows.first['rowid'] as int,
+                assignmentVersion,
+              );
+            }
+            await txn.update(
+              'sync_queue',
+              {
+                'status': 'synced',
+                'server_record_id': int.tryParse(
+                  serverAssignment['id'].toString(),
+                ),
+                'synced_at': DateTime.now().toUtc().toIso8601String(),
+                'last_error': null,
+                'next_attempt_at': null,
+              },
+              where: 'queue_id = ? AND owner_id = ?',
+              whereArgs: [queueId, owner],
+            );
+          });
+          await _refreshCachedTasks(owner, db);
+          _queueChanged();
           return;
         }
         final record = data is Map
@@ -835,12 +1408,25 @@ class OfflineSyncService {
 
       final message = _safeServerMessage(data, status);
       if (status == 422 || status == 403 || status == 404 || status == 409) {
+        if (operation == 'task_status' &&
+            status == 409 &&
+            data is Map &&
+            data['assignment'] is Map) {
+          await _storeTaskAssignmentInCache(
+            db,
+            owner,
+            Map<String, dynamic>.from(data['assignment'] as Map),
+          );
+        }
         await db.update(
           'sync_queue',
           {'status': 'failed', 'last_error': message, 'next_attempt_at': null},
           where: 'queue_id = ? AND owner_id = ?',
           whereArgs: [queueId, owner],
         );
+        if (operation == 'task_status') {
+          await _refreshCachedTasks(owner, db);
+        }
         _queueChanged();
         return;
       }
@@ -1033,6 +1619,9 @@ class OfflineSyncService {
       where: 'queue_id = ? AND owner_id = ?',
       whereArgs: [row['queue_id'], row['owner_id']],
     );
+    if (row['operation'] == 'task_status') {
+      await _refreshCachedTasks(row['owner_id'] as String, db);
+    }
     _queueChanged();
   }
 

@@ -25,6 +25,26 @@ class _EmployeeTasksScreenState extends State<EmployeeTasksScreen> {
   String? cacheFetchedAt;
   String? error;
 
+  void _onQueueChanged() => _loadCachedTasks();
+
+  Future<void> _loadCachedTasks() async {
+    try {
+      final cached = await OfflineSyncService.readCachedItems('tasks');
+      final rows = (cached?['items'] as List?)
+          ?.whereType<Map>()
+          .map((row) => Map<String, dynamic>.from(row))
+          .toList();
+      if (rows != null && mounted) {
+        setState(() {
+          assignments = rows;
+          cacheFetchedAt = cached?['fetched_at']?.toString();
+        });
+      }
+    } catch (_) {
+      // Keep the current list visible if the local database is unavailable.
+    }
+  }
+
   Future<void> loadTasks() async {
     if (!mounted) return;
     if (assignments.isEmpty) setState(() => loading = true);
@@ -53,6 +73,8 @@ class _EmployeeTasksScreenState extends State<EmployeeTasksScreen> {
           offlineMode = cached != null;
           error = offlineMode
               ? null
+              : cached == null
+              ? 'My Tasks has not been loaded on this device yet. Connect to the server and load it once before making offline updates.'
               : ApiService.messageFromResponse(
                   response['data'],
                   response['status'],
@@ -71,15 +93,22 @@ class _EmployeeTasksScreenState extends State<EmployeeTasksScreen> {
                 .map((row) => Map<String, dynamic>.from(row))
                 .toList()
           : <Map<String, dynamic>>[];
+      var visible = remote;
       try {
         await OfflineSyncService.saveCachedItems('tasks', remote);
         final saved = await OfflineSyncService.readCachedItems('tasks');
         cacheFetchedAt = saved?['fetched_at']?.toString();
+        visible =
+            (saved?['items'] as List?)
+                ?.whereType<Map>()
+                .map((row) => Map<String, dynamic>.from(row))
+                .toList() ??
+            remote;
       } catch (_) {
         // Keep the live response even if the local cache cannot be updated.
       }
       setState(() {
-        assignments = remote;
+        assignments = visible;
         offlineMode = false;
         error = null;
         loading = false;
@@ -88,7 +117,9 @@ class _EmployeeTasksScreenState extends State<EmployeeTasksScreen> {
       if (mounted) {
         setState(() {
           offlineMode = cached != null;
-          error = offlineMode ? null : 'Unable to reach the task service.';
+          error = offlineMode
+              ? null
+              : 'My Tasks has not been loaded on this device yet. Connect to the server and load it once before making offline updates.';
           loading = false;
         });
       }
@@ -98,7 +129,14 @@ class _EmployeeTasksScreenState extends State<EmployeeTasksScreen> {
   @override
   void initState() {
     super.initState();
+    OfflineSyncService.queueRevision.addListener(_onQueueChanged);
     loadTasks();
+  }
+
+  @override
+  void dispose() {
+    OfflineSyncService.queueRevision.removeListener(_onQueueChanged);
+    super.dispose();
   }
 
   @override
@@ -167,11 +205,21 @@ class _EmployeeTasksScreenState extends State<EmployeeTasksScreen> {
           [
             ?project,
             'Priority: ${task['priority'] ?? 'normal'}',
-            'Due: ${task['due_date'].toString().split("T")[0] ?? 'Not set'}',
+            'Due: ${task['due_date']?.toString().split("T").first ?? 'Not set'}',
             'Status: ${status.replaceAll('_', ' ')}',
           ].join('  •  '),
         ),
-        trailing: AppStatusBadge(status: status),
+        trailing: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.end,
+          children: [
+            AppStatusBadge(status: status),
+            if (assignment['sync_status'] != null) ...[
+              const SizedBox(height: 5),
+              _syncLabel(assignment['sync_status']?.toString()),
+            ],
+          ],
+        ),
         onTap: () async {
           final changed = await Navigator.push<bool>(
             context,
@@ -182,6 +230,38 @@ class _EmployeeTasksScreenState extends State<EmployeeTasksScreen> {
           if (changed == true && mounted) loadTasks();
         },
       ),
+    );
+  }
+
+  Widget _syncLabel(String? status) {
+    final (label, icon, color) = switch (status) {
+      'syncing' => (
+        'Syncing',
+        Icons.sync,
+        Theme.of(context).colorScheme.primary,
+      ),
+      'synced' => ('Synced', Icons.cloud_done_outlined, Colors.green.shade700),
+      'failed' => (
+        'Failed · retry available',
+        Icons.error_outline,
+        Colors.red.shade700,
+      ),
+      _ => (
+        'Pending sync',
+        Icons.cloud_upload_outlined,
+        Colors.orange.shade800,
+      ),
+    };
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(icon, size: 13, color: color),
+        const SizedBox(width: 3),
+        Text(
+          label,
+          style: Theme.of(context).textTheme.labelSmall?.copyWith(color: color),
+        ),
+      ],
     );
   }
 }
@@ -199,7 +279,11 @@ class EmployeeTaskDetailScreen extends StatefulWidget {
 class _EmployeeTaskDetailScreenState extends State<EmployeeTaskDetailScreen> {
   late String status;
   late final TextEditingController notesController;
-  bool saving = false;
+  bool queueing = false;
+  bool changed = false;
+  String? syncStatus;
+  String? syncError;
+  String? queueId;
 
   static const statuses = ['assigned', 'in_progress', 'completed', 'on_hold'];
 
@@ -207,48 +291,107 @@ class _EmployeeTaskDetailScreenState extends State<EmployeeTaskDetailScreen> {
   void initState() {
     super.initState();
     status = widget.assignment['status']?.toString() ?? 'assigned';
+    syncStatus = widget.assignment['sync_status']?.toString();
+    syncError = widget.assignment['sync_error']?.toString();
+    queueId = widget.assignment['sync_queue_id']?.toString();
     notesController = TextEditingController(
       text: widget.assignment['progress_notes']?.toString() ?? '',
     );
+    OfflineSyncService.queueRevision.addListener(_refreshSyncState);
+    _refreshSyncState();
   }
 
-  Future<void> saveProgress() async {
-    if (saving) return;
-    setState(() => saving = true);
+  Future<void> _refreshSyncState() async {
+    final assignmentId = widget.assignment['id']?.toString();
+    if (assignmentId == null) return;
     try {
-      final id = widget.assignment['id'];
-      final response = await ApiService.patch('/employee/tasks/$id/progress', {
-        'status': status,
-        'progress_notes': notesController.text,
+      final state = await OfflineSyncService.getTaskSyncState(assignmentId);
+      if (state == null || !mounted) return;
+      setState(() {
+        syncStatus = state['sync_status']?.toString();
+        syncError = state['last_error']?.toString();
+        queueId = state['queue_id']?.toString();
+        if (state['sync_status'] != 'synced' && state['status'] != null) {
+          status = state['status'].toString();
+        }
       });
-      if (!mounted) return;
-      if (ApiService.isSuccess(response['status'])) {
-        Navigator.pop(context, true);
-      } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              ApiService.messageFromResponse(
-                response['data'],
-                response['status'],
-              ),
-            ),
-          ),
-        );
-      }
     } catch (_) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Unable to save task progress.')),
-        );
-      }
+      // The selected local status remains available if queue details cannot be read.
+    }
+  }
+
+  Future<void> _queueProgress(String nextStatus) async {
+    if (queueing) return;
+    final previousStatus = status;
+    final previousSyncStatus = syncStatus;
+    final previousSyncError = syncError;
+    final previousQueueId = queueId;
+    final previousChanged = changed;
+    setState(() {
+      status = nextStatus;
+      syncStatus = 'waiting';
+      syncError = null;
+      queueing = true;
+      changed = true;
+    });
+    try {
+      final id = await OfflineSyncService.queueTaskStatusUpdate(
+        assignment: widget.assignment,
+        status: nextStatus,
+        progressNotes: notesController.text,
+      );
+      if (!mounted) return;
+      setState(() {
+        queueId = id;
+        queueing = false;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Progress saved on this device. Sync will continue automatically.',
+          ),
+        ),
+      );
+      _refreshSyncState();
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        status = previousStatus;
+        syncStatus = previousSyncStatus;
+        syncError = previousSyncError;
+        queueId = previousQueueId;
+        queueing = false;
+        changed = previousChanged;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            error is ArgumentError
+                ? error.message.toString()
+                : 'Unable to save this update on the device.',
+          ),
+        ),
+      );
+    }
+  }
+
+  Future<void> _retrySync() async {
+    final id = queueId;
+    if (id == null || queueing) return;
+    setState(() => queueing = true);
+    try {
+      await OfflineSyncService.retryQueueItem(id);
     } finally {
-      if (mounted) setState(() => saving = false);
+      if (mounted) {
+        setState(() => queueing = false);
+        await _refreshSyncState();
+      }
     }
   }
 
   @override
   void dispose() {
+    OfflineSyncService.queueRevision.removeListener(_refreshSyncState);
     notesController.dispose();
     super.dispose();
   }
@@ -262,7 +405,14 @@ class _EmployeeTaskDetailScreenState extends State<EmployeeTaskDetailScreen> {
         ? task['project']['name']?.toString()
         : null;
     return Scaffold(
-      appBar: AppBar(title: const Text('Task details')),
+      appBar: AppBar(
+        leading: IconButton(
+          onPressed: () => Navigator.pop(context, changed),
+          icon: const BackButtonIcon(),
+          tooltip: 'Back',
+        ),
+        title: const Text('Task details'),
+      ),
       body: ListView(
         padding: const EdgeInsets.fromLTRB(20, 8, 20, 28),
         children: [
@@ -297,10 +447,12 @@ class _EmployeeTaskDetailScreenState extends State<EmployeeTaskDetailScreen> {
                   const SizedBox(height: 12),
                   Text('Priority  ·  ${task['priority'] ?? 'normal'}'),
                   const SizedBox(height: 6),
-                  Text('Due date  ·  ${task['due_date'].toString().split("T")[0] ?? 'Not set'}'),
+                  Text(
+                    'Due date  ·  ${task['due_date']?.toString().split("T").first ?? 'Not set'}',
+                  ),
                   const SizedBox(height: 6),
                   Text(
-                    'Assigned  ·  ${widget.assignment['assigned_at'].toString().split("T")[0] ?? '—'}',
+                    'Assigned  ·  ${widget.assignment['assigned_at']?.toString().split("T").first ?? '—'}',
                   ),
                   const SizedBox(height: 14),
                   const Divider(height: 1),
@@ -328,10 +480,18 @@ class _EmployeeTaskDetailScreenState extends State<EmployeeTaskDetailScreen> {
                   ),
                 )
                 .toList(),
-            onChanged: saving
+            onChanged: queueing || syncStatus == 'failed'
                 ? null
-                : (value) => setState(() => status = value!),
+                : (value) {
+                    if (value != null && value != status) {
+                      _queueProgress(value);
+                    }
+                  },
           ),
+          if (syncStatus != null) ...[
+            const SizedBox(height: 10),
+            _syncStatePanel(),
+          ],
           const SizedBox(height: 16),
           TextField(
             controller: notesController,
@@ -345,15 +505,70 @@ class _EmployeeTaskDetailScreenState extends State<EmployeeTaskDetailScreen> {
           ),
           const SizedBox(height: 16),
           FilledButton.icon(
-            onPressed: saving ? null : saveProgress,
-            icon: saving
-                ? const SizedBox.square(
-                    dimension: 18,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : const Icon(Icons.save_outlined),
-            label: Text(saving ? 'Saving…' : 'Save progress'),
+            onPressed: queueing || syncStatus == 'failed'
+                ? null
+                : () => _queueProgress(status),
+            icon: const Icon(Icons.save_outlined),
+            label: const Text('Save progress and notes'),
           ),
+        ],
+      ),
+    );
+  }
+
+  Widget _syncStatePanel() {
+    final (label, icon, color) = switch (syncStatus) {
+      'syncing' => (
+        'Syncing',
+        Icons.sync,
+        Theme.of(context).colorScheme.primary,
+      ),
+      'synced' => ('Synced', Icons.cloud_done_outlined, Colors.green.shade700),
+      'failed' => (
+        'Failed — retry available',
+        Icons.error_outline,
+        Colors.red.shade700,
+      ),
+      _ => (
+        'Pending sync',
+        Icons.cloud_upload_outlined,
+        Colors.orange.shade800,
+      ),
+    };
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(icon, size: 17, color: color),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  label,
+                  style: TextStyle(color: color, fontWeight: FontWeight.w600),
+                ),
+              ),
+              if (syncStatus == 'failed')
+                TextButton(
+                  onPressed: queueing ? null : _retrySync,
+                  child: const Text('Retry'),
+                ),
+            ],
+          ),
+          if (syncError != null && syncError!.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Text(
+                syncError!,
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+            ),
         ],
       ),
     );

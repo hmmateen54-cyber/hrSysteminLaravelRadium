@@ -127,11 +127,41 @@ class TaskAndFeedbackApiTest extends TestCase
             ->patchJson("/api/employee/tasks/{$ownAssignment->id}/progress", [
                 'status' => 'in_progress',
                 'progress_notes' => 'Review is underway.',
+                'client_event_id' => '9d190edd-a5be-4df2-8b3d-53799c4c297f',
+                'expected_version' => 0,
+                'client_updated_at' => '2026-10-15T08:14:00Z',
             ])
             ->assertOk()
-            ->assertJsonPath('assignment.status', 'in_progress');
+            ->assertJsonPath('assignment.status', 'in_progress')
+            ->assertJsonPath('assignment.progress_version', 1)
+            ->assertJsonPath('client_event_id', '9d190edd-a5be-4df2-8b3d-53799c4c297f');
+
+        $this->withToken($token)
+            ->patchJson("/api/employee/tasks/{$ownAssignment->id}/progress", [
+                'status' => 'in_progress',
+                'progress_notes' => 'Review is underway.',
+                'client_event_id' => '9d190edd-a5be-4df2-8b3d-53799c4c297f',
+                'expected_version' => 0,
+                'client_updated_at' => '2026-10-15T08:14:00Z',
+            ])
+            ->assertOk()
+            ->assertJsonPath('duplicate', true)
+            ->assertJsonPath('assignment.progress_version', 1);
+
+        $this->withToken($token)
+            ->patchJson("/api/employee/tasks/{$ownAssignment->id}/progress", [
+                'status' => 'completed',
+                'progress_notes' => 'A stale offline update.',
+                'client_event_id' => '9f2d9a3e-3547-48a4-b316-90a2543bd276',
+                'expected_version' => 0,
+                'client_updated_at' => '2026-10-15T08:15:00Z',
+            ])
+            ->assertStatus(409)
+            ->assertJsonPath('assignment.status', 'in_progress')
+            ->assertJsonPath('assignment.progress_version', 1);
 
         $this->assertSame('assigned', $otherAssignment->fresh()->status);
+        $this->assertSame('in_progress', $ownAssignment->fresh()->status);
     }
 
     public function test_hr_can_create_tasks_and_assignments_but_employees_cannot_use_management_api(): void

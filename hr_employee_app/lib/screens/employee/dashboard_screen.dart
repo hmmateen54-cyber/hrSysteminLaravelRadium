@@ -52,6 +52,25 @@ class _DashboardScreenState extends State<DashboardScreen> {
   List<Map<String, dynamic>> _overviewPerformance = [];
   List<Map<String, dynamic>> _overviewTasks = [];
 
+  Future<void> _onQueueChanged() async {
+    try {
+      final cached = await OfflineSyncService.readCachedItems('tasks');
+      final rows = (cached?['items'] as List?)
+          ?.whereType<Map>()
+          .map((row) => Map<String, dynamic>.from(row))
+          .toList();
+      if (rows != null && mounted) {
+        setState(() {
+          _overviewTasks = rows;
+          _overviewFetchedAt ??= cached?['fetched_at']?.toString();
+          _overviewHasData = _overviewHasData || rows.isNotEmpty;
+        });
+      }
+    } catch (_) {
+      // The dashboard can keep showing its current summary if cache reads fail.
+    }
+  }
+
   Future<void> getProfile() async {
     if (!mounted || _requestInFlight) return;
     _requestInFlight = true;
@@ -336,6 +355,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
         // Live history can still be shown without local queue details.
       }
 
+      final visibleTasks = success[1]
+          ? ((cachedTasks?['items'] as List?)
+                    ?.whereType<Map>()
+                    .map((row) => Map<String, dynamic>.from(row))
+                    .toList() ??
+                liveTasks)
+          : _overviewTasks;
+
       setState(() {
         _overviewLeaves = _mergeQueued(
           queuedLeaves,
@@ -345,7 +372,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     .where((row) => !row.containsKey('sync_status'))
                     .toList(),
         );
-        _overviewTasks = success[1] ? liveTasks : _overviewTasks;
+        _overviewTasks = visibleTasks;
         _overviewPerformance = success[2]
             ? livePerformance
             : _overviewPerformance;
@@ -396,6 +423,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   @override
   void initState() {
     super.initState();
+    OfflineSyncService.queueRevision.addListener(_onQueueChanged);
     _autoRefresh = AutoRefreshController(
       owner: this,
       onRefresh: _refreshDashboard,
@@ -406,6 +434,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   @override
   void dispose() {
+    OfflineSyncService.queueRevision.removeListener(_onQueueChanged);
     _autoRefresh.dispose();
     super.dispose();
   }

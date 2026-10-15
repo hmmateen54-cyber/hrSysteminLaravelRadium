@@ -108,7 +108,11 @@ class TaskController extends Controller
                 ->where('employee_id', $request->user()->employee?->id)
                 ->lockForUpdate()
                 ->firstOrFail();
-            $locked->update($validated);
+            $locked->update([
+                ...$validated,
+                'progress_version' => $locked->progress_version + 1,
+                'last_client_event_id' => null,
+            ]);
         });
         return back()->with('success', 'Task progress updated.');
     }
@@ -202,16 +206,60 @@ class TaskController extends Controller
         $validated = $request->validate([
             'status' => ['required', 'in:assigned,in_progress,completed,on_hold'],
             'progress_notes' => ['nullable', 'string', 'max:3000'],
+            'client_event_id' => ['sometimes', 'required', 'uuid'],
+            'expected_version' => ['required_with:client_event_id', 'integer', 'min:0'],
+            'client_updated_at' => ['required_with:client_event_id', 'date'],
         ]);
-        $updated = DB::transaction(function () use ($request, $assignment, $validated) {
+        $clientEventId = $validated['client_event_id'] ?? null;
+        $result = DB::transaction(function () use ($request, $assignment, $validated, $clientEventId) {
             $locked = TaskAssignment::query()
                 ->whereKey($assignment->id)
                 ->where('employee_id', $request->user()->employee?->id)
                 ->lockForUpdate()->firstOrFail();
-            $locked->update($validated);
-            return $locked->load('task.project');
+
+            if ($clientEventId !== null && $locked->last_client_event_id === $clientEventId) {
+                return [
+                    'assignment' => $locked->load('task.project'),
+                    'duplicate' => true,
+                    'conflict' => false,
+                ];
+            }
+
+            if ($clientEventId !== null &&
+                (int) $locked->progress_version !== (int) $validated['expected_version']) {
+                return [
+                    'assignment' => $locked->load('task.project'),
+                    'duplicate' => false,
+                    'conflict' => true,
+                ];
+            }
+
+            $locked->update([
+                'status' => $validated['status'],
+                'progress_notes' => $validated['progress_notes'] ?? null,
+                'progress_version' => $locked->progress_version + 1,
+                'last_client_event_id' => $clientEventId,
+            ]);
+
+            return [
+                'assignment' => $locked->load('task.project'),
+                'duplicate' => false,
+                'conflict' => false,
+            ];
         });
-        return response()->json(['assignment' => $updated]);
+
+        if ($result['conflict']) {
+            return response()->json([
+                'message' => 'This task was updated elsewhere. Review the server version before retrying.',
+                'assignment' => $result['assignment'],
+            ], 409);
+        }
+
+        return response()->json([
+            'assignment' => $result['assignment'],
+            'client_event_id' => $clientEventId,
+            'duplicate' => $result['duplicate'],
+        ]);
     }
 
     private function validatedTask(Request $request): array

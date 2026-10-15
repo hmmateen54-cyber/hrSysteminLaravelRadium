@@ -9,7 +9,10 @@ class TaskAssignment extends Model
 {
     protected $fillable = [
         'task_id', 'employee_id', 'status', 'progress_notes', 'assigned_at',
+        'progress_version', 'last_client_event_id',
     ];
+
+    protected $hidden = ['last_client_event_id'];
 
     protected function casts(): array
     {

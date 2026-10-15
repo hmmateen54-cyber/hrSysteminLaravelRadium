@@ -41,4 +41,63 @@ void main() {
       expect(item['address'], isNull);
     },
   );
+
+  test(
+    'task progress is cached optimistically and each offline change is queued in order',
+    () async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.windows;
+      addTearDown(() => debugDefaultTargetPlatformOverride = null);
+      final ownerId = DateTime.now().microsecondsSinceEpoch;
+      SharedPreferences.setMockInitialValues({'user': '{"id": $ownerId}'});
+      final assignment = <String, dynamic>{
+        'id': 4101,
+        'task_id': 2901,
+        'status': 'assigned',
+        'progress_notes': null,
+        'progress_version': 0,
+        'updated_at': '2026-10-15T03:00:00.000000Z',
+        'task': {'id': 2901, 'title': 'Prepare monthly report'},
+      };
+      await OfflineSyncService.saveCachedItems('tasks', [assignment]);
+
+      final firstQueueId = await OfflineSyncService.queueTaskStatusUpdate(
+        assignment: assignment,
+        status: 'in_progress',
+        progressNotes: 'Started offline.',
+      );
+      await Future<void>.delayed(const Duration(milliseconds: 2));
+      final secondQueueId = await OfflineSyncService.queueTaskStatusUpdate(
+        assignment: assignment,
+        status: 'completed',
+        progressNotes: 'Finished offline.',
+      );
+
+      final queued = await OfflineSyncService.getQueueItems(
+        operation: 'task_status',
+        includeSynced: false,
+      );
+      final first = queued.firstWhere(
+        (item) => item['queue_id'] == firstQueueId,
+      );
+      final second = queued.firstWhere(
+        (item) => item['queue_id'] == secondQueueId,
+      );
+      expect(first['assignment_id'], 4101);
+      expect(first['task_id'], 2901);
+      expect(first['status'], 'in_progress');
+      expect(first['expected_version'], 0);
+      expect(first['original_updated_at'], isNotNull);
+      expect(second['status'], 'completed');
+      expect(second['expected_version'], 1);
+
+      // A live refresh that temporarily omits a queued assignment must not
+      // remove the employee's cached task or optimistic status.
+      await OfflineSyncService.saveCachedItems('tasks', []);
+      final cached = await OfflineSyncService.readCachedItems('tasks');
+      final cachedAssignment = (cached?['items'] as List).first as Map;
+      expect(cachedAssignment['status'], 'completed');
+      expect(cachedAssignment['sync_status'], 'waiting');
+      expect(cachedAssignment['sync_queue_id'], secondQueueId);
+    },
+  );
 }
